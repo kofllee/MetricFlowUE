@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class MetricFlowUE : ModuleRules
+public class MetricFlowCore : ModuleRules
 {
-	public MetricFlowUE(ReadOnlyTargetRules Target) : base(Target)
+	public MetricFlowCore(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 		
