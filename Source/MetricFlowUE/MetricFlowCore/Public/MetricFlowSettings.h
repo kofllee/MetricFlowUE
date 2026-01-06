@@ -52,6 +52,21 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Reliability", meta=(ClampMin="0", UIMin="0", ClampMax="10", UIMax="10"))
 	int32 RetryCount = 3;
 
+	FString GetActiveEndpointURL() const
+	{
+#if UE_BUILD_SHIPPING
+		return ShippingEndpointURL;
+#endif
+		return DevEndpointURL;
+	};
+
+	FString GetActiveSheet() const
+	{
+#if UE_BUILD_SHIPPING
+		return ShippingSheet;
+#endif
+		return DevSheet;
+	};
 
 	static const UMetricFlowSettings* Get()
 	{

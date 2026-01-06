@@ -1,5 +1,6 @@
 #include "MetricFlowCore.h"
 #include "MetricFlowLog.h"
+#include "MetricFlowSettings.h"
 
 #define LOCTEXT_NAMESPACE "FMetricFlowCoreModule"
 
@@ -17,4 +18,4 @@ void FMetricFlowCoreModule::ShutdownModule()
 
 #undef LOCTEXT_NAMESPACE
 	
-IMPLEMENT_MODULE(FMetricFlowCoreModule, MetricFlowUE)
+IMPLEMENT_MODULE(FMetricFlowCoreModule, MetricFlowCore)
