@@ -47,7 +47,7 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	ActiveDefaultSheet = Settings->GetActiveSheet();
 
 	MaxQueueSize = Settings->MaxQueueSize;
-	BatchSize = Settings->BatchSize;
+	BatchSize = FMath::Min(1, Settings->BatchSize);
 
 	if (ActiveEndpointURL.IsEmpty())
 	{
@@ -184,7 +184,7 @@ FMetricFlowPayload UMetricFlowSubsystem::CreatePayloadFromMap(const TMap<FString
 	FMetricFlowPayload Payload;
 	for (const TPair<FString, FString>& Pair : Map)
 	{
-		Payload.Add(Pair.Key, Pair.Value);
+		Payload.AddString(Pair.Key, Pair.Value);
 	}
 	return Payload;
 }

@@ -13,10 +13,10 @@ public:
 	TMap<FString, FString> Data;
 
 public:
-	FORCEINLINE bool IsEmpty() const { return Data.Num() == 0; }
-	FORCEINLINE int32 Num() const { return Data.Num(); }
+	bool IsEmpty() const { return Data.Num() == 0; }
+	int32 Num() const { return Data.Num(); }
 
-	FORCEINLINE FMetricFlowPayload& Add(const FString& Key, const FString& Value)
+	FMetricFlowPayload& AddString(const FString& Key, const FString& Value)
 	{
 		if (!SetString(Key, Value))
 		{
@@ -24,18 +24,18 @@ public:
 		}
 		return *this;
 	}
-
-	FORCEINLINE FMetricFlowPayload& AddInt(const FString& Key, const int32 Value)
+	
+	FMetricFlowPayload& AddInt(const FString& Key, const int32 Value)
 	{
-		return Add(Key, FString::FromInt(Value));
+		return AddString(Key, FString::FromInt(Value));
 	}
-	FORCEINLINE FMetricFlowPayload& AddFloat(const FString& Key, const float Value)
+	FMetricFlowPayload& AddFloat(const FString& Key, const float Value)
 	{
-		return Add(Key, FString::SanitizeFloat(Value));
+		return AddString(Key, FString::SanitizeFloat(Value));
 	}
-	FORCEINLINE FMetricFlowPayload& AddBool(const FString& Key, const bool Value)
+	FMetricFlowPayload& AddBool(const FString& Key, const bool Value)
 	{
-		return Add(Key, Value ? TEXT("true") : TEXT("false"));
+		return AddString(Key, Value ? TEXT("true") : TEXT("false"));
 	}
 
 private:
