@@ -1,8 +1,6 @@
 #include "MetricFlowSubsystem.h"
-
 #include "MetricFlowEvent.h"
 #include "MetricFlowPayload.h"
-#include "MetricFlowSettings.h"
 
 namespace MetricFLow
 {
@@ -32,7 +30,7 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 
 #if UE_BUILD_SHIPPING
-	if (Settings->bDisableInShipping)
+	if (!Settings->bSendInShipping)
 	{
 		bEnabledRuntime = false;
 		return;
@@ -44,9 +42,18 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	ActiveEndpointURL = Settings->GetActiveEndpointURL();
 	ActiveDefaultSheet = Settings->GetActiveSheet();
 
+	MaxQueueSize = Settings->MaxQueueSize;
+	BatchSize = Settings->BatchSize;
+
 	if (ActiveEndpointURL.IsEmpty())
 	{
 		UE_LOG(LogMetricFlow, Error, TEXT("UMetricFlowSubsystem::Initialize: No active endpoint"));
+		bEnabledRuntime = false;
+		return;
+	}
+	if (MaxQueueSize < 0)
+	{
+		UE_LOG(LogMetricFlow, Error, TEXT("UMetricFlowSubsystem::Initialize: Invalid MaxQueueSize=%d"), MaxQueueSize);
 		bEnabledRuntime = false;
 		return;
 	}
@@ -57,8 +64,6 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Context.Platform = FString(FPlatformProperties::PlatformName());
 	Context.PlatformVersion = FPlatformMisc::GetOSVersion();
 	Context.LevelName = MetricFLow::GetLevelNameSafe(GetWorld());
-
-	SequenceCounter = 0;
 
 	UE_LOG(
 		LogMetricFlow,
@@ -73,7 +78,7 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		*Context.LevelName
 	);
 
-	if (bEnabledRuntime)
+	if (!bEnabledRuntime)
 	{
 		return;
 	}
@@ -101,18 +106,25 @@ void UMetricFlowSubsystem::Deinitialize()
 }
 
 
-void UMetricFlowSubsystem::RecordEventPayload(const FName& EventName, const FMetricFlowPayload& Payload, const FString& SheetOverride)
+void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlowPayload& Payload, const FString& SheetOverride)
 {
 	FMetricFlowEvent Event = CreateMetricFlowEvent(EventName, Payload, SheetOverride);
-
+	Event.TimestampUTC = FDateTime::UtcNow();
+	
 	Context.LevelName = MetricFLow::GetLevelNameSafe(GetWorld());
+	Event.Context = Context;
+	
+	EventQueue.Add(Event);
+	const int32 Overflow = EventQueue.Num() - MaxQueueSize;
+	if (Overflow > 0)
+		EventQueue.RemoveAt(0, Overflow);
 }
 
 void UMetricFlowSubsystem::RecordEventMap(const FName& EventName, const TMap<FString, FString>& Map, const FString& SheetOverride)
 {
 	FMetricFlowPayload Payload = CreatePayloadFromMap(Map);
 
-	RecordEventPayload(EventName, Payload, SheetOverride);
+	RecordEvent(EventName, Payload, SheetOverride);
 }
 
 
@@ -128,6 +140,8 @@ FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventN
 
 void UMetricFlowSubsystem::TickFlush()
 {
+	if (!bEnabledRuntime || EventQueue.Num() == 0) return;
+
 	
 }
 

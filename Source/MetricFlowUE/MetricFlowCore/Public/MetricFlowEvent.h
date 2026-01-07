@@ -8,11 +8,14 @@ struct METRICFLOWCORE_API FMetricFlowEvent
 	GENERATED_BODY()
 	
 public:
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Metric Flow")
-	FDateTime TimestampUTC;
-	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Metric Flow")
 	FName EventName;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Metric Flow")
+	FDateTime TimestampUTC;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Metric Flow")
+	FMetricFlowContext Context;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Metric Flow")
 	FMetricFlowPayload Payload;

@@ -2,6 +2,7 @@
 
 #include "MetricFlowContext.h"
 #include "MetricFlowEvent.h"
+#include "MetricFlowSettings.h"
 #include "MetricFlowSubsystem.generated.h"
 
 struct FMetricFlowPayload;
@@ -16,7 +17,7 @@ public:
 	virtual void Deinitialize() override;
 
 	UFUNCTION(BlueprintCallable, Category="Metric Flow")
-	void RecordEventPayload(const FName& EventName, const FMetricFlowPayload& Payload, const FString& SheetOverride);
+	void RecordEvent(const FName& EventName, const FMetricFlowPayload& Payload, const FString& SheetOverride);
 	UFUNCTION(BlueprintCallable, Category="Metric Flow")
 	void RecordEventMap(const FName& EventName, const TMap<FString, FString>& Map, const FString& SheetOverride);
 
@@ -28,7 +29,9 @@ private:
 	
 	FMetricFlowContext Context;
 
-	int64 SequenceCounter = 0;
+	TArray<FMetricFlowEvent> EventQueue;
+	int32 MaxQueueSize = 2000;
+	int32 BatchSize;
 
 	FTimerHandle TimerHandle;
 
