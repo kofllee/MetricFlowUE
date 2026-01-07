@@ -1,6 +1,8 @@
 #include "MetricFlowSubsystem.h"
+
 #include "MetricFlowEvent.h"
 #include "MetricFlowPayload.h"
+#include "MetricFlowJson.h"
 
 namespace MetricFLow
 {
@@ -39,6 +41,8 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	bEnabledRuntime = Settings->bEnableMetricFlow;
 
+	ProjectToken = Settings->ProjectToken;
+	
 	ActiveEndpointURL = Settings->GetActiveEndpointURL();
 	ActiveDefaultSheet = Settings->GetActiveSheet();
 
@@ -94,7 +98,7 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	World->GetTimerManager().SetTimer(
 		TimerHandle,
 		this,
-		&UMetricFlowSubsystem::TickFlush,
+		&UMetricFlowSubsystem::Flush,
 		FlushInterval,
 		true
 	);
@@ -117,7 +121,7 @@ void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlow
 	EventQueue.Add(Event);
 	const int32 Overflow = EventQueue.Num() - MaxQueueSize;
 	if (Overflow > 0)
-		EventQueue.RemoveAt(0, Overflow);
+		EventQueue.RemoveAt(0, Overflow, EAllowShrinking::No);
 }
 
 void UMetricFlowSubsystem::RecordEventMap(const FName& EventName, const TMap<FString, FString>& Map, const FString& SheetOverride)
@@ -138,11 +142,41 @@ FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventN
 	return Event;
 }
 
-void UMetricFlowSubsystem::TickFlush()
+void UMetricFlowSubsystem::Flush()
 {
 	if (!bEnabledRuntime || EventQueue.Num() == 0) return;
-
+	if (ActiveEndpointURL.IsEmpty()) return;
+	if (bIsFlushing) return;
 	
+	const int32 Count = FMath::Min(BatchSize, EventQueue.Num());
+
+	BatchEvents.Reset();
+	BatchEvents.Append(EventQueue.GetData(), Count);
+	EventQueue.RemoveAt(0, Count, EAllowShrinking::No);
+
+	const FString Json = MetricFlowJson::SerializeBatchToString(ProjectToken, ActiveDefaultSheet, BatchEvents);
+	if (Json.IsEmpty())
+	{
+		EventQueue.Insert(BatchEvents, 0);
+		return;
+	}
+
+	bIsFlushing = true;
+
+	Sender.PostJson(ActiveEndpointURL, Json,
+		[this](bool bWasSuccessful, int32 ResponseCode, const FString& ResponseBody) 
+		{
+			if (!bWasSuccessful)
+			{
+				UE_LOG(LogMetricFlow, Warning, TEXT("MetricFlow flush failed: code=%d body=%s"), ResponseCode, *ResponseBody);
+				EventQueue.Insert(BatchEvents, 0);
+			}
+			else
+			{
+				UE_LOG(LogMetricFlow, Verbose, TEXT("MetricFlow flush succeeded: code=%d body=%s"), ResponseCode, *ResponseBody);
+			}
+			bIsFlushing = false;
+		});
 }
 
 FMetricFlowPayload UMetricFlowSubsystem::CreatePayloadFromMap(const TMap<FString, FString>& Map)

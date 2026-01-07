@@ -2,6 +2,7 @@
 
 #include "MetricFlowContext.h"
 #include "MetricFlowEvent.h"
+#include "MetricFlowHttpSender.h"
 #include "MetricFlowSettings.h"
 #include "MetricFlowSubsystem.generated.h"
 
@@ -24,6 +25,8 @@ public:
 private:
 	bool bEnabledRuntime = true;
 
+	FString ProjectToken;
+	
 	FString ActiveEndpointURL;
 	FString ActiveDefaultSheet;
 	
@@ -34,8 +37,12 @@ private:
 	int32 BatchSize;
 
 	FTimerHandle TimerHandle;
+	FMetricFlowHttpSender Sender = FMetricFlowHttpSender();
 
-	void TickFlush();
+	bool bIsFlushing = false;
+	TArray<FMetricFlowEvent> BatchEvents;
+
+	void Flush();
 	
 	static FMetricFlowPayload CreatePayloadFromMap(const TMap<FString, FString>& Map);
 	static FMetricFlowEvent CreateMetricFlowEvent(const FName& EventName, const FMetricFlowPayload& Payload,

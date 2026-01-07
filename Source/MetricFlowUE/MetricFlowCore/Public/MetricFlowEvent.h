@@ -1,5 +1,6 @@
 #pragma once
 #include "MetricFlowPayload.h"
+#include "MetricFlowContext.h"
 #include "MetricFlowEvent.generated.h"
 
 USTRUCT(BlueprintType)
