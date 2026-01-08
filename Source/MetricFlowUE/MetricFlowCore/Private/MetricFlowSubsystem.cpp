@@ -49,6 +49,8 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	MaxQueueSize = Settings->MaxQueueSize;
 	BatchSize = FMath::Min(1, Settings->BatchSize);
 
+	TimeoutSeconds = Settings->RequestTimeoutSeconds;
+
 	if (ActiveEndpointURL.IsEmpty())
 	{
 		UE_LOG(LogMetricFlow, Error, TEXT("UMetricFlowSubsystem::Initialize: No active endpoint"));
@@ -163,19 +165,22 @@ void UMetricFlowSubsystem::Flush()
 
 	bIsFlushing = true;
 
-	Sender.PostJson(ActiveEndpointURL, Json,
-		[this](bool bWasSuccessful, int32 ResponseCode, const FString& ResponseBody) 
+	TWeakObjectPtr<UMetricFlowSubsystem> WeakThis(this);
+	Sender.PostJson(ActiveEndpointURL, Json, TimeoutSeconds,
+		[WeakThis](bool bWasSuccessful, int32 ResponseCode, const FString& ResponseBody) 
 		{
-			if (!bWasSuccessful)
-			{
-				UE_LOG(LogMetricFlow, Warning, TEXT("MetricFlow flush failed: code=%d body=%s"), ResponseCode, *ResponseBody);
-				EventQueue.Insert(BatchEvents, 0);
-			}
-			else
+			if (!WeakThis.IsValid()) return;
+			
+			WeakThis->bIsFlushing = false;
+			
+			if (bWasSuccessful)
 			{
 				UE_LOG(LogMetricFlow, Verbose, TEXT("MetricFlow flush succeeded: code=%d body=%s"), ResponseCode, *ResponseBody);
+				return;
 			}
-			bIsFlushing = false;
+
+			UE_LOG(LogMetricFlow, Warning, TEXT("MetricFlow flush failed: code=%d body=%s"), ResponseCode, *ResponseBody);
+			WeakThis->EventQueue.Insert(WeakThis->BatchEvents, 0);
 		});
 }
 

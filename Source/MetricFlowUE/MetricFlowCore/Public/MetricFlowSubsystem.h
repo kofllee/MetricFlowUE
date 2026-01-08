@@ -36,6 +36,8 @@ private:
 	int32 MaxQueueSize = 2000;
 	int32 BatchSize;
 
+	float TimeoutSeconds;
+
 	FTimerHandle TimerHandle;
 	FMetricFlowHttpSender Sender = FMetricFlowHttpSender();
 

@@ -4,7 +4,7 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 
-void FMetricFlowHttpSender::PostJson(const FString& Url, const FString& JsonBody,
+void FMetricFlowHttpSender::PostJson(const FString& Url, const FString& JsonBody, const float TimeoutSeconds,
                                      TFunction<void(bool, int32, const FString&)> OnComplete)
 {
 	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> HttpRequest = FHttpModule::Get().CreateRequest();
@@ -23,5 +23,8 @@ void FMetricFlowHttpSender::PostJson(const FString& Url, const FString& JsonBody
 		    OnComplete(bWasSuccessful, ResponseCode, ResponseBody);
 	    });
 
+	HttpRequest->SetTimeout(TimeoutSeconds);
 	HttpRequest->ProcessRequest();
+
+	UE_LOG(LogTemp, Display, TEXT("MetricFlowHttpSender::PostJson: Sent POST request to %s"), *Url);
 }

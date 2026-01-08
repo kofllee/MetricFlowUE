@@ -47,10 +47,10 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, Category="Batching", meta=(ClampMin="10", UIMin="10"))
 	int32 MaxQueueSize = 2000;
-
 	
-	UPROPERTY(EditAnywhere, Config, Category="Reliability", meta=(ClampMin="0", UIMin="0", ClampMax="10", UIMax="10"))
-	int32 RetryCount = 3;
+
+	UPROPERTY(EditAnywhere, Config, Category="Reliability", meta=(ClampMin="0.1", UIMin="0.1", ClampMax="60", UIMax="60"))
+	float RequestTimeoutSeconds = 10.0f;
 
 	FString GetActiveEndpointURL() const
 	{
