@@ -22,7 +22,7 @@ void FMetricFlowHttpSender::PostJson(const FString& Url, const FString& ProxyApi
 		    int32 ResponseCode = Response.IsValid() ? Response->GetResponseCode() : -1;
 		    FString ResponseBody = Response.IsValid() ? Response->GetContentAsString() : FString();
 
-	    	const bool bWasSuccessful = bConnected && Response.IsValid() && (ResponseCode >= 200 && ResponseCode < 300);
+	    	const bool bWasSuccessful = bConnected && Response.IsValid();
 		    OnComplete(bWasSuccessful, ResponseCode, ResponseBody);
 	    });
 

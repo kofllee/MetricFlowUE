@@ -79,6 +79,12 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		bEnabledRuntime = false;
 		return;
 	}
+	if (ProjectId.IsEmpty())
+	{
+		UE_LOG(LogMetricFlow, Error, TEXT("UMetricFlowSubsystem::Initialize: No ProjectId"));
+		bEnabledRuntime = false;
+		return;
+	}
 
 	Context.SessionId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
 	Context.UserId = FString();
@@ -189,9 +195,9 @@ void UMetricFlowSubsystem::Flush()
 			
 			WeakThis->bIsFlushing = false;
 			
-			if (bWasSuccessful)
+			if (bWasSuccessful && ResponseCode >= 200 && ResponseCode < 300)
 			{
-				UE_LOG(LogMetricFlow, Verbose, TEXT("MetricFlow flush succeeded: code=%d body=%s"), ResponseCode, *ResponseBody);
+				UE_LOG(LogMetricFlow, Log, TEXT("MetricFlow flush succeeded: code=%d body=%s"), ResponseCode, *ResponseBody);
 				return;
 			}
 
