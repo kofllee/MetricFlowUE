@@ -1,10 +1,10 @@
 #pragma once
 
 #include "MetricFlowLog.h"
-#include "MetricFlowPayload.generated.h"
+#include "MetricFlowFields.generated.h"
 
 USTRUCT(BlueprintType)
-struct METRICFLOWCORE_API FMetricFlowPayload
+struct METRICFLOWCORE_API FMetricFlowFields
 {
 	GENERATED_BODY()
 	
@@ -16,7 +16,7 @@ public:
 	bool IsEmpty() const { return Data.Num() == 0; }
 	int32 Num() const { return Data.Num(); }
 
-	FMetricFlowPayload& AddString(const FString& Key, const FString& Value)
+	FMetricFlowFields& AddString(const FString& Key, const FString& Value)
 	{
 		if (!SetString(Key, Value))
 		{
@@ -25,17 +25,33 @@ public:
 		return *this;
 	}
 	
-	FMetricFlowPayload& AddInt(const FString& Key, const int32 Value)
+	FMetricFlowFields& AddInt(const FString& Key, const int32 Value)
 	{
 		return AddString(Key, FString::FromInt(Value));
 	}
-	FMetricFlowPayload& AddFloat(const FString& Key, const float Value)
+	FMetricFlowFields& AddFloat(const FString& Key, const float Value)
 	{
 		return AddString(Key, FString::SanitizeFloat(Value));
 	}
-	FMetricFlowPayload& AddBool(const FString& Key, const bool Value)
+	FMetricFlowFields& AddBool(const FString& Key, const bool Value)
 	{
 		return AddString(Key, Value ? TEXT("true") : TEXT("false"));
+	}
+	FMetricFlowFields& AddMap(const TMap<FString, FString>& Values)
+	{
+		for (const TPair<FString, FString>& Pair : Values)
+		{
+			SetString(Pair.Key, Pair.Value);
+		}
+		return *this;
+	}
+	FMetricFlowFields& operator+(const FMetricFlowFields& Other)
+	{
+		for (const TPair<FString, FString>& Pair : Other.Data)
+		{
+			SetString(Pair.Key, Pair.Value);
+		}
+		return *this;
 	}
 
 private:

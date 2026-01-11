@@ -1,6 +1,5 @@
 #include "MetricFlowCore.h"
 #include "MetricFlowLog.h"
-#include "MetricFlowSettings.h"
 
 #define LOCTEXT_NAMESPACE "FMetricFlowCoreModule"
 

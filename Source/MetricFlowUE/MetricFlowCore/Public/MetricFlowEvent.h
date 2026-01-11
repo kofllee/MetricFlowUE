@@ -1,6 +1,5 @@
 #pragma once
-#include "MetricFlowPayload.h"
-#include "MetricFlowContext.h"
+#include "MetricFlowFields.h"
 #include "MetricFlowEvent.generated.h"
 
 USTRUCT(BlueprintType)
@@ -16,10 +15,10 @@ public:
 	FDateTime TimestampUTC;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Metric Flow")
-	FMetricFlowContext Context;
+	FMetricFlowFields Context;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Metric Flow")
-	FMetricFlowPayload Payload;
+	FMetricFlowFields Payload;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Metric Flow")
 	FString SheetOverride;

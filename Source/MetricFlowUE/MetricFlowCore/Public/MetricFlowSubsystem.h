@@ -1,12 +1,11 @@
 #pragma once
 
-#include "MetricFlowContext.h"
 #include "MetricFlowEvent.h"
 #include "MetricFlowHttpSender.h"
 #include "MetricFlowSettings.h"
 #include "MetricFlowSubsystem.generated.h"
 
-struct FMetricFlowPayload;
+struct FMetricFlowFields;
 
 UCLASS()
 class METRICFLOWCORE_API UMetricFlowSubsystem : public UGameInstanceSubsystem
@@ -18,9 +17,9 @@ public:
 	virtual void Deinitialize() override;
 
 	UFUNCTION(BlueprintCallable, Category="Metric Flow")
-	void RecordEvent(const FName& EventName, const FMetricFlowPayload& Payload, const FString& SheetOverride);
+	void RecordEvent(const FName& EventName, const FMetricFlowFields& ExtraContext, const FMetricFlowFields& Payload, const FString& SheetOverride);
 	UFUNCTION(BlueprintCallable, Category="Metric Flow")
-	void RecordEventMap(const FName& EventName, const TMap<FString, FString>& Map, const FString& SheetOverride);
+	void RecordEventMap(const FName& EventName, const TMap<FString, FString>& ExtraContextMap, const TMap<FString, FString>& PayloadMap, const FString& SheetOverride);
 
 private:
 	bool bEnabledRuntime = true;
@@ -29,9 +28,13 @@ private:
 	FString ProxyApiKey;
 	
 	FString ActiveEndpointURL;
-	FString ActiveDefaultSheet;
 	
-	FMetricFlowContext Context;
+	TArray<TObjectPtr<UMetricFlowContextProviderBase>> SessionContextProviders;
+	TArray<TObjectPtr<UMetricFlowContextProviderBase>> EventContextProviders;
+
+	TMap<FString, FString> CachedSessionContext;
+
+	FString SessionId;
 
 	TArray<FMetricFlowEvent> EventQueue;
 	int32 MaxQueueSize = 2000;
@@ -46,8 +49,10 @@ private:
 	TArray<FMetricFlowEvent> BatchEvents;
 
 	void Flush();
+
+	void LoadProvidersFromSettings(const UMetricFlowSettings* Settings);
+	void RebuildSessionContextCache();
 	
-	static FMetricFlowPayload CreatePayloadFromMap(const TMap<FString, FString>& Map);
-	static FMetricFlowEvent CreateMetricFlowEvent(const FName& EventName, const FMetricFlowPayload& Payload,
-		const FString& SheetOverride);
+	static FMetricFlowEvent CreateMetricFlowEvent(const FName& EventName, const FMetricFlowFields& ExtraContext,
+		const FMetricFlowFields& Payload, const FString& SheetOverride);
 };

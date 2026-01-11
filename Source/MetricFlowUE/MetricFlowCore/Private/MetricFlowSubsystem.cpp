@@ -1,22 +1,13 @@
 #include "MetricFlowSubsystem.h"
 
+#include "MetricFlowDefaultEventContextProvider.h"
+#include "MetricFlowDefaultSessionContextProvider.h"
 #include "MetricFlowEvent.h"
-#include "MetricFlowPayload.h"
+#include "MetricFlowFields.h"
 #include "MetricFlowJson.h"
 
 namespace MetricFLow
 {
-	static FString GetLevelNameSafe(const UWorld* World)
-	{
-		if (!World)
-		{
-			return FString();
-		}
-		
-		const FString Raw = World->GetMapName();
-		return UWorld::RemovePIEPrefix(Raw);
-	}
-
 	static bool ShouldRetry(bool bWasSuccessful, int32 ResponseCode)
 	{
 		if (!bWasSuccessful)
@@ -60,7 +51,6 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	ProxyApiKey = Settings->ProxyApiKey;
 	
 	ActiveEndpointURL = Settings->GetActiveEndpointURL();
-	ActiveDefaultSheet = Settings->GetActiveSheet();
 
 	MaxQueueSize = Settings->MaxQueueSize;
 	BatchSize = FMath::Min(1, Settings->BatchSize);
@@ -86,30 +76,22 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		return;
 	}
 
-	Context.SessionId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
-	Context.UserId = FString();
-	Context.BuildVersion = FApp::GetBuildVersion();
-	Context.Platform = FString(FPlatformProperties::PlatformName());
-	Context.PlatformVersion = FPlatformMisc::GetOSVersion();
-	Context.LevelName = MetricFLow::GetLevelNameSafe(GetWorld());
-
-	UE_LOG(
-		LogMetricFlow,
-		Log,
-		TEXT("MetricFlow init: enabled=%d session=%s sheet=%s url=%s build=%s platform=%s level=%s"),
-		bEnabledRuntime ? 1 : 0,
-		*Context.SessionId,
-		*ActiveDefaultSheet,
-		*ActiveEndpointURL,
-		*Context.BuildVersion,
-		*Context.Platform,
-		*Context.LevelName
-	);
-
 	if (!bEnabledRuntime)
 	{
 		return;
 	}
+
+	SessionId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
+	LoadProvidersFromSettings(Settings);
+	RebuildSessionContextCache();
+
+	UE_LOG(
+		LogMetricFlow,
+		Log,
+		TEXT("MetricFlow init: enabled=%d session=%s"),
+		bEnabledRuntime ? 1 : 0,
+		*SessionId
+	);
 	
 	UWorld* World = GetWorld();
 	if (!World)
@@ -134,13 +116,18 @@ void UMetricFlowSubsystem::Deinitialize()
 }
 
 
-void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlowPayload& Payload, const FString& SheetOverride)
+void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlowFields& ExtraContext, const FMetricFlowFields& Payload, const FString& SheetOverride)
 {
-	FMetricFlowEvent Event = CreateMetricFlowEvent(EventName, Payload, SheetOverride);
-	Event.TimestampUTC = FDateTime::UtcNow();
+	FMetricFlowFields EventContext;
+	for (const UMetricFlowContextProviderBase* Provider : EventContextProviders)
+	{
+		TMap<FString, FString> ProviderFields;
+		Provider->CollectFields(this, ProviderFields);
+		UE_LOG(LogMetricFlow, Verbose, TEXT("EventContext Provider %s fields:"), *Provider->GetName());
+		EventContext = EventContext.AddMap(ProviderFields);
+	}
 	
-	Context.LevelName = MetricFLow::GetLevelNameSafe(GetWorld());
-	Event.Context = Context;
+	const FMetricFlowEvent Event = CreateMetricFlowEvent(EventName, EventContext + ExtraContext, Payload, SheetOverride);
 	
 	EventQueue.Add(Event);
 	const int32 Overflow = EventQueue.Num() - MaxQueueSize;
@@ -148,19 +135,24 @@ void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlow
 		EventQueue.RemoveAt(0, Overflow, EAllowShrinking::No);
 }
 
-void UMetricFlowSubsystem::RecordEventMap(const FName& EventName, const TMap<FString, FString>& Map, const FString& SheetOverride)
+void UMetricFlowSubsystem::RecordEventMap(const FName& EventName, const TMap<FString, FString>& ExtraContextMap, const TMap<FString, FString>& PayloadMap, const FString& SheetOverride)
 {
-	FMetricFlowPayload Payload = CreatePayloadFromMap(Map);
+	
+	const FMetricFlowFields ExtraContext = FMetricFlowFields().AddMap(ExtraContextMap);
+	const FMetricFlowFields Payload = FMetricFlowFields().AddMap(PayloadMap);
 
-	RecordEvent(EventName, Payload, SheetOverride);
+	RecordEvent(EventName, ExtraContext, Payload, SheetOverride);
 }
 
 
-FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventName, const FMetricFlowPayload& Payload,
-		const FString& SheetOverride)
+FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventName, const FMetricFlowFields& Context,
+	const FMetricFlowFields& Payload, const FString& SheetOverride)
 {
-	FMetricFlowEvent Event;
+	FMetricFlowEvent Event = FMetricFlowEvent();
+	
 	Event.EventName = EventName;
+	Event.Context = Context;
+	Event.TimestampUTC = FDateTime::UtcNow();
 	Event.Payload = Payload;
 	Event.SheetOverride = SheetOverride;
 	return Event;
@@ -178,7 +170,8 @@ void UMetricFlowSubsystem::Flush()
 	BatchEvents.Append(EventQueue.GetData(), Count);
 	EventQueue.RemoveAt(0, Count, EAllowShrinking::No);
 
-	const FString Json = MetricFlowJson::SerializeBatchToString(ProjectId, ActiveDefaultSheet, BatchEvents);
+	FMetricFlowFields SessionContext = FMetricFlowFields().AddMap(CachedSessionContext);
+	const FString Json = MetricFlowJson::SerializeBatchToString(ProjectId, SessionContext, BatchEvents);
 	if (Json.IsEmpty())
 	{
 		EventQueue.Insert(BatchEvents, 0);
@@ -207,12 +200,57 @@ void UMetricFlowSubsystem::Flush()
 		});
 }
 
-FMetricFlowPayload UMetricFlowSubsystem::CreatePayloadFromMap(const TMap<FString, FString>& Map)
+void UMetricFlowSubsystem::LoadProvidersFromSettings(const UMetricFlowSettings* Settings)
 {
-	FMetricFlowPayload Payload;
-	for (const TPair<FString, FString>& Pair : Map)
+	for (TSubclassOf<UMetricFlowContextProviderBase> ProviderClass : Settings->SessionContextProviders)
 	{
-		Payload.AddString(Pair.Key, Pair.Value);
+		if (!ProviderClass) continue;
+		if (UMetricFlowContextProviderBase* Provider = NewObject<UMetricFlowContextProviderBase>(this, ProviderClass))
+		{
+			SessionContextProviders.Add(Provider);
+		}
 	}
-	return Payload;
+	if (SessionContextProviders.Num() == 0)
+	{
+		if (UMetricFlowContextProviderBase* Provider =
+			NewObject<UMetricFlowContextProviderBase>(this, UMetricFlowDefaultSessionContextProvider::StaticClass()))
+		{
+			SessionContextProviders.Add(Provider);
+		}
+	}
+
+	for (TSubclassOf<UMetricFlowContextProviderBase> ProviderClass : Settings->EventContextProviders)
+	{
+		if (!ProviderClass) continue;
+		if (UMetricFlowContextProviderBase* Provider = NewObject<UMetricFlowContextProviderBase>(this, ProviderClass))
+		{
+			EventContextProviders.Add(Provider);
+		}
+	}
+	if (EventContextProviders.Num() == 0)
+	{
+		if (UMetricFlowContextProviderBase* Provider =
+			NewObject<UMetricFlowContextProviderBase>(this, UMetricFlowDefaultEventContextProvider::StaticClass()))
+		{
+			EventContextProviders.Add(Provider);
+		}
+	}
+}
+
+void UMetricFlowSubsystem::RebuildSessionContextCache()
+{
+	CachedSessionContext.Reset();
+
+	for (const UMetricFlowContextProviderBase* Provider : SessionContextProviders)
+	{
+		if (!Provider) continue;
+
+		TMap<FString, FString> ProviderFields;
+		Provider->CollectFields(this, ProviderFields);
+
+		for (const TPair<FString, FString>& Pair : ProviderFields)
+		{
+			CachedSessionContext.Add(Pair.Key, Pair.Value);
+		}
+	}
 }

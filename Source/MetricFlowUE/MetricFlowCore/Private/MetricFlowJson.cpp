@@ -1,25 +1,12 @@
 #include "MetricFlowJson.h"
 
-#include "MetricFlowContext.h"
 #include "MetricFlowEvent.h"
-#include "MetricFlowPayload.h"
+#include "MetricFlowFields.h"
 
-static TSharedPtr<FJsonObject> SerializeContextToJson(const FMetricFlowContext& Context)
+static TSharedPtr<FJsonObject> SerializeFieldsToJson(const FMetricFlowFields& Fields)
 {
 	TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
-	Json->SetStringField(TEXT("sessionId"), Context.SessionId);
-	Json->SetStringField(TEXT("userId"), Context.UserId);
-	Json->SetStringField(TEXT("buildVersion"), Context.BuildVersion);
-	Json->SetStringField(TEXT("platform"), Context.Platform);
-	Json->SetStringField(TEXT("platformVersion"), Context.PlatformVersion);
-	Json->SetStringField(TEXT("levelName"),	Context.LevelName);
-	return Json;
-}
-
-static TSharedPtr<FJsonObject> SerializePayloadToJson(const FMetricFlowPayload& Payload)
-{
-	TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
-	for (const TPair<FString, FString>& Pair : Payload.Data)
+	for (const TPair<FString, FString>& Pair : Fields.Data)
 	{
 		Json->SetStringField(Pair.Key, Pair.Value);
 	}
@@ -28,12 +15,12 @@ static TSharedPtr<FJsonObject> SerializePayloadToJson(const FMetricFlowPayload& 
 
 FString MetricFlowJson::SerializeBatchToString(
 	const FString& ProjectId,
-	const FString& DefaultSheet,
+	const FMetricFlowFields& SessionContext,
 	const TArray<FMetricFlowEvent>& Events)
 {
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetStringField(TEXT("projectId"),	ProjectId);
-	Root->SetStringField(TEXT("defaultSheet"), DefaultSheet);
+	Root->SetObjectField(TEXT("sessionContext"), SerializeFieldsToJson(SessionContext));
 
 	TArray<TSharedPtr<FJsonValue>> JsonEvents;
 	JsonEvents.Reserve(Events.Num());
@@ -43,12 +30,12 @@ FString MetricFlowJson::SerializeBatchToString(
 		TSharedPtr<FJsonObject> JsonEvent = MakeShared<FJsonObject>();
 		JsonEvent->SetStringField(TEXT("eventName"), Event.EventName.ToString());
 		JsonEvent->SetStringField(TEXT("timestampUTC"), Event.TimestampUTC.ToIso8601());
-		JsonEvent->SetObjectField(TEXT("context"), SerializeContextToJson(Event.Context));
+		JsonEvent->SetObjectField(TEXT("eventContext"), SerializeFieldsToJson(Event.Context));
 		if (!Event.SheetOverride.IsEmpty())
 		{
 			JsonEvent->SetStringField(TEXT("sheet"), Event.SheetOverride);
 		}
-		JsonEvent->SetObjectField(TEXT("payload"), SerializePayloadToJson(Event.Payload));
+		JsonEvent->SetObjectField(TEXT("payload"), SerializeFieldsToJson(Event.Payload));
 
 		JsonEvents.Add(MakeShared<FJsonValueObject>(JsonEvent));
 	}

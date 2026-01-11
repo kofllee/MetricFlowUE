@@ -1,12 +1,12 @@
 #pragma once
 
-struct FMetricFlowContext;
+struct FMetricFlowFields;
 struct FMetricFlowEvent;
 
 namespace MetricFlowJson
 {
 	FString SerializeBatchToString(
 		const FString& ProjectId,
-		const FString& DefaultSheet,
+		const FMetricFlowFields& SessionContext,
 		const TArray<FMetricFlowEvent>& Events);
 }
