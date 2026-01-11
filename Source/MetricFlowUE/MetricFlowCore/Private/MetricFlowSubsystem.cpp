@@ -53,7 +53,7 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	ActiveEndpointURL = Settings->GetActiveEndpointURL();
 
 	MaxQueueSize = Settings->MaxQueueSize;
-	BatchSize = FMath::Min(1, Settings->BatchSize);
+	BatchSize = FMath::Max(1, Settings->BatchSize);
 
 	TimeoutSeconds = Settings->RequestTimeoutSeconds;
 
