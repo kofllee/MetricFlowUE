@@ -17,6 +17,21 @@ namespace MetricFLow
 		return UWorld::RemovePIEPrefix(Raw);
 	}
 
+	static bool ShouldRetry(bool bWasSuccessful, int32 ResponseCode)
+	{
+		if (!bWasSuccessful)
+		{
+			return true;
+		}
+
+		if (ResponseCode >= 500 && ResponseCode < 600)
+		{
+			return true;
+		}
+		
+		return false;
+	}
+
 }
 
 void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -41,7 +56,8 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	bEnabledRuntime = Settings->bEnableMetricFlow;
 
-	ProjectToken = Settings->ProjectToken;
+	ProjectId = Settings->ProjectId;
+	ProxyApiKey = Settings->ProxyApiKey;
 	
 	ActiveEndpointURL = Settings->GetActiveEndpointURL();
 	ActiveDefaultSheet = Settings->GetActiveSheet();
@@ -156,7 +172,7 @@ void UMetricFlowSubsystem::Flush()
 	BatchEvents.Append(EventQueue.GetData(), Count);
 	EventQueue.RemoveAt(0, Count, EAllowShrinking::No);
 
-	const FString Json = MetricFlowJson::SerializeBatchToString(ProjectToken, ActiveDefaultSheet, BatchEvents);
+	const FString Json = MetricFlowJson::SerializeBatchToString(ProjectId, ActiveDefaultSheet, BatchEvents);
 	if (Json.IsEmpty())
 	{
 		EventQueue.Insert(BatchEvents, 0);
@@ -166,7 +182,7 @@ void UMetricFlowSubsystem::Flush()
 	bIsFlushing = true;
 
 	TWeakObjectPtr<UMetricFlowSubsystem> WeakThis(this);
-	Sender.PostJson(ActiveEndpointURL, Json, TimeoutSeconds,
+	Sender.PostJson(ActiveEndpointURL, ProxyApiKey, Json, TimeoutSeconds,
 		[WeakThis](bool bWasSuccessful, int32 ResponseCode, const FString& ResponseBody) 
 		{
 			if (!WeakThis.IsValid()) return;
@@ -180,7 +196,8 @@ void UMetricFlowSubsystem::Flush()
 			}
 
 			UE_LOG(LogMetricFlow, Warning, TEXT("MetricFlow flush failed: code=%d body=%s"), ResponseCode, *ResponseBody);
-			WeakThis->EventQueue.Insert(WeakThis->BatchEvents, 0);
+			if (MetricFLow::ShouldRetry(bWasSuccessful, ResponseCode))
+				WeakThis->EventQueue.Insert(WeakThis->BatchEvents, 0);
 		});
 }
 

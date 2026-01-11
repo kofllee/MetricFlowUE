@@ -25,7 +25,8 @@ public:
 private:
 	bool bEnabledRuntime = true;
 
-	FString ProjectToken;
+	FString ProjectId;
+	FString ProxyApiKey;
 	
 	FString ActiveEndpointURL;
 	FString ActiveDefaultSheet;

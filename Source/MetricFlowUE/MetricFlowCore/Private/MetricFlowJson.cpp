@@ -27,12 +27,12 @@ static TSharedPtr<FJsonObject> SerializePayloadToJson(const FMetricFlowPayload& 
 }
 
 FString MetricFlowJson::SerializeBatchToString(
-	const FString& ProjectToken,
+	const FString& ProjectId,
 	const FString& DefaultSheet,
 	const TArray<FMetricFlowEvent>& Events)
 {
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
-	Root->SetStringField(TEXT("token"),	ProjectToken);
+	Root->SetStringField(TEXT("projectId"),	ProjectId);
 	Root->SetStringField(TEXT("defaultSheet"), DefaultSheet);
 
 	TArray<TSharedPtr<FJsonValue>> JsonEvents;

@@ -23,8 +23,11 @@ public:
 	bool bSendInShipping = true;
 	
 
-	UPROPERTY(EditAnywhere, Config, Category="Destination", meta=(DisplayName="Project Token"))
-	FString ProjectToken;
+	UPROPERTY(EditAnywhere, Config, Category="Destination", meta=(DisplayName="Project Id"))
+	FString ProjectId;
+
+	UPROPERTY(EditAnywhere, Config, Category="Destination", meta=(DisplayName="Proxy API Key"))
+	FString ProxyApiKey;
 
 	UPROPERTY(EditAnywhere, Config, Category="Destination|Dev", meta=(DisplayName="Dev Endpoint URL"))
 	FString DevEndpointURL;
