@@ -15,7 +15,7 @@ public:
 	FDateTime TimestampUTC;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Metric Flow")
-	int64 SequenceNumber;
+	int64 SequenceNumber = 0;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Metric Flow")
 	FMetricFlowFields Context;
