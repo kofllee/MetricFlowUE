@@ -5,6 +5,31 @@
 #include "MetricFlowSettings.h"
 #include "MetricFlowSubsystem.generated.h"
 
+enum class EMetricFlowOp : uint8
+{
+	UpsertSession,
+	AppendEvents,
+};
+
+FORCEINLINE const TCHAR* ToString(EMetricFlowOp Op)
+{
+	switch (Op)
+	{
+	case EMetricFlowOp::UpsertSession: return TEXT("UpsertSession");
+	case EMetricFlowOp::AppendEvents:  return TEXT("AppendEvents");
+	default:                           return TEXT("Unknown");
+	}
+}
+
+struct FMetricFlowPendingRequest
+{
+	EMetricFlowOp Op;
+	FString Json;
+
+	TArray<FMetricFlowEvent> SendBatch;
+};
+
+
 struct FMetricFlowFields;
 
 UCLASS()
@@ -35,6 +60,8 @@ private:
 	TMap<FString, FString> CachedSessionContext;
 
 	FString SessionId;
+	FString SessionStartedAtUTC;
+	FString SessionEndedAtUTC;
 
 	TArray<FMetricFlowEvent> EventQueue;
 	int32 MaxQueueSize = 2000;
@@ -46,9 +73,15 @@ private:
 	FMetricFlowHttpSender Sender = FMetricFlowHttpSender();
 
 	bool bIsFlushing = false;
-	TArray<FMetricFlowEvent> BatchEvents;
 
-	void Flush();
+	bool BuildUpsertSessionRequest(FMetricFlowPendingRequest& OutReq);
+	bool BuildAppendEventsRequest(FMetricFlowPendingRequest& OutReq);
+	
+	void TrySendUpsertSession();
+	void TrySendAppendEvents();
+	void SendRequest(FMetricFlowPendingRequest Req);
+	void OnRequestCompleted(const FMetricFlowPendingRequest& Req, const bool bWasSuccessful, const int32 ResponseCode, const FString& ResponseBody);
+
 
 	void LoadProvidersFromSettings(const UMetricFlowSettings* Settings);
 	void RebuildSessionContextCache();

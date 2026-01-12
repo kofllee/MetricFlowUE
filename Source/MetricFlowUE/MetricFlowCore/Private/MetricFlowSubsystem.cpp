@@ -82,6 +82,8 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 
 	SessionId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
+	SessionStartedAtUTC = FDateTime::UtcNow().ToIso8601();
+	SessionEndedAtUTC = TEXT("");
 	LoadProvidersFromSettings(Settings);
 	RebuildSessionContextCache();
 
@@ -100,11 +102,13 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		return;
 	}
 
+	TrySendUpsertSession();
+	
 	const float FlushInterval = Settings->FlushIntervalSeconds;
 	World->GetTimerManager().SetTimer(
 		TimerHandle,
 		this,
-		&UMetricFlowSubsystem::Flush,
+		&UMetricFlowSubsystem::TrySendAppendEvents,
 		FlushInterval,
 		true
 	);
@@ -113,6 +117,9 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UMetricFlowSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
+
+	SessionEndedAtUTC = FDateTime::UtcNow().ToIso8601();
+	TrySendUpsertSession();
 }
 
 
@@ -158,46 +165,103 @@ FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventN
 	return Event;
 }
 
-void UMetricFlowSubsystem::Flush()
+bool UMetricFlowSubsystem::BuildUpsertSessionRequest(FMetricFlowPendingRequest& OutReq)
 {
-	if (!bEnabledRuntime || EventQueue.Num() == 0) return;
-	if (ActiveEndpointURL.IsEmpty()) return;
-	if (bIsFlushing) return;
+	FMetricFlowFields Session = FMetricFlowFields();
+	Session.AddString(TEXT("sessionId"), SessionId);
+	Session.AddString(TEXT("startedAtUTC"), SessionStartedAtUTC);
+	Session.AddString(TEXT("endedAtUTC"), SessionEndedAtUTC);
+	Session.AddMap(CachedSessionContext);
+
+	const FString Json = MetricFlowJson::SerializeUpsertSessionToString(ProjectId, Session);
+	if (Json.IsEmpty()) return false;
+
+	OutReq = FMetricFlowPendingRequest();
+	OutReq.Op = EMetricFlowOp::UpsertSession;
+	OutReq.Json = Json;
+	return true;
+}
+
+bool UMetricFlowSubsystem::BuildAppendEventsRequest(FMetricFlowPendingRequest& OutReq)
+{
+	if (EventQueue.Num() == 0) return false;
 	
 	const int32 Count = FMath::Min(BatchSize, EventQueue.Num());
 
-	BatchEvents.Reset();
-	BatchEvents.Append(EventQueue.GetData(), Count);
+	TArray<FMetricFlowEvent> Batch;
+	Batch.Reserve(Count);
+	Batch.Append(EventQueue.GetData(), Count);
 	EventQueue.RemoveAt(0, Count, EAllowShrinking::No);
 
-	FMetricFlowFields SessionContext = FMetricFlowFields().AddMap(CachedSessionContext);
-	const FString Json = MetricFlowJson::SerializeBatchToString(ProjectId, SessionContext, BatchEvents);
+	const FString Json = MetricFlowJson::SerializeAppendEventsToString(ProjectId, SessionId, Batch);
 	if (Json.IsEmpty())
 	{
-		EventQueue.Insert(BatchEvents, 0);
-		return;
+		EventQueue.Insert(Batch, 0);
+		return false;
+	}
+
+	OutReq = FMetricFlowPendingRequest();
+	OutReq.Op = EMetricFlowOp::AppendEvents;
+	OutReq.Json = Json;
+	OutReq.SendBatch = MoveTemp(Batch);
+	
+	return true;
+}
+
+void UMetricFlowSubsystem::TrySendUpsertSession()
+{
+	FMetricFlowPendingRequest Req;
+	if (!BuildUpsertSessionRequest(Req)) return;
+	SendRequest(MoveTemp(Req));
+}
+
+void UMetricFlowSubsystem::TrySendAppendEvents()
+{
+	FMetricFlowPendingRequest Req;
+	if (!BuildAppendEventsRequest(Req)) return;
+	SendRequest(MoveTemp(Req));
+}
+
+void UMetricFlowSubsystem::SendRequest(FMetricFlowPendingRequest Req)
+{
+	if (!bEnabledRuntime) return;
+	if (ActiveEndpointURL.IsEmpty()) return;
+	if (bIsFlushing) return;
+	if (Req.Json.IsEmpty())
+	{
+		UE_LOG(LogMetricFlow, Warning, TEXT("UMetricFlowSubsystem::SendRequest: Empty JSON for %s"), ToString(Req.Op));
 	}
 
 	bIsFlushing = true;
 
 	TWeakObjectPtr<UMetricFlowSubsystem> WeakThis(this);
-	Sender.PostJson(ActiveEndpointURL, ProxyApiKey, Json, TimeoutSeconds,
-		[WeakThis](bool bWasSuccessful, int32 ResponseCode, const FString& ResponseBody) 
+	Sender.PostJson(ActiveEndpointURL, ProxyApiKey, Req.Json, TimeoutSeconds,
+		[WeakThis, Req](bool bWasSuccessful, int32 ResponseCode, const FString& ResponseBody) 
 		{
 			if (!WeakThis.IsValid()) return;
-			
-			WeakThis->bIsFlushing = false;
-			
-			if (bWasSuccessful && ResponseCode >= 200 && ResponseCode < 300)
-			{
-				UE_LOG(LogMetricFlow, Log, TEXT("MetricFlow flush succeeded: code=%d body=%s"), ResponseCode, *ResponseBody);
-				return;
-			}
-
-			UE_LOG(LogMetricFlow, Warning, TEXT("MetricFlow flush failed: code=%d body=%s"), ResponseCode, *ResponseBody);
-			if (MetricFLow::ShouldRetry(bWasSuccessful, ResponseCode))
-				WeakThis->EventQueue.Insert(WeakThis->BatchEvents, 0);
+			WeakThis->OnRequestCompleted(Req, bWasSuccessful, ResponseCode, ResponseBody);
 		});
+}
+
+void UMetricFlowSubsystem::OnRequestCompleted(const FMetricFlowPendingRequest& Req, const bool bWasSuccessful, const int32 ResponseCode,
+	const FString& ResponseBody)
+{
+	bIsFlushing = false;
+
+	if (bWasSuccessful && ResponseCode >= 200 && ResponseCode < 300)
+	{
+		UE_LOG(LogMetricFlow, Log, TEXT("MetricFlow %s succeeded: code=%d body=%s"),ToString(Req.Op), ResponseCode, *ResponseBody);
+		return;
+	}
+
+	UE_LOG(LogMetricFlow, Warning, TEXT("MetricFlow %s failed: code=%d body=%s"), ToString(Req.Op), ResponseCode, *ResponseBody);
+	if (MetricFLow::ShouldRetry(bWasSuccessful, ResponseCode))
+	{
+		if (Req.Op == EMetricFlowOp::AppendEvents)
+		{
+			EventQueue.Insert(Req.SendBatch, 0);
+		}
+	}
 }
 
 void UMetricFlowSubsystem::LoadProvidersFromSettings(const UMetricFlowSettings* Settings)

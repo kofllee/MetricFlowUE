@@ -5,8 +5,14 @@ struct FMetricFlowEvent;
 
 namespace MetricFlowJson
 {
-	FString SerializeBatchToString(
+	TSharedPtr<FJsonObject> SerializeFieldsToJson(const FMetricFlowFields& Fields);
+
+	FString SerializeAppendEventsToString(
 		const FString& ProjectId,
-		const FMetricFlowFields& SessionContext,
+		const FString& SessionId,
 		const TArray<FMetricFlowEvent>& Events);
+
+	FString SerializeUpsertSessionToString(
+		const FString& ProjectId,
+		const FMetricFlowFields& SessionSnapshot);
 }

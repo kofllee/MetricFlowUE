@@ -3,7 +3,8 @@
 #include "MetricFlowEvent.h"
 #include "MetricFlowFields.h"
 
-static TSharedPtr<FJsonObject> SerializeFieldsToJson(const FMetricFlowFields& Fields)
+
+TSharedPtr<FJsonObject> MetricFlowJson::SerializeFieldsToJson(const FMetricFlowFields& Fields)
 {
 	TSharedPtr<FJsonObject> Json = MakeShared<FJsonObject>();
 	for (const TPair<FString, FString>& Pair : Fields.Data)
@@ -13,14 +14,13 @@ static TSharedPtr<FJsonObject> SerializeFieldsToJson(const FMetricFlowFields& Fi
 	return Json;
 }
 
-FString MetricFlowJson::SerializeBatchToString(
-	const FString& ProjectId,
-	const FMetricFlowFields& SessionContext,
+FString MetricFlowJson::SerializeAppendEventsToString(const FString& ProjectId, const FString& SessionId,
 	const TArray<FMetricFlowEvent>& Events)
 {
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetStringField(TEXT("projectId"),	ProjectId);
-	Root->SetObjectField(TEXT("sessionContext"), SerializeFieldsToJson(SessionContext));
+	Root->SetStringField(TEXT("op"),	TEXT("appendEvents"));
+	Root->SetStringField(TEXT("sessionId"), SessionId);
 
 	TArray<TSharedPtr<FJsonValue>> JsonEvents;
 	JsonEvents.Reserve(Events.Num());
@@ -50,6 +50,26 @@ FString MetricFlowJson::SerializeBatchToString(
 		return out;
 	}
 	
-	UE_LOG(LogMetricFlow, Error, TEXT("MetricFlowJson::SerializeBatchToString: Failed to serialize JSON"));
+	UE_LOG(LogMetricFlow, Error, TEXT("MetricFlowJson::SerializeAppendEventsToString: Failed to serialize JSON"));
+	return FString();
+}
+
+FString MetricFlowJson::SerializeUpsertSessionToString(const FString& ProjectId,
+	const FMetricFlowFields& Session)
+{
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetStringField(TEXT("projectId"),	ProjectId);
+	Root->SetStringField(TEXT("op"),	TEXT("upsertSession"));
+	Root->SetObjectField(TEXT("session"), SerializeFieldsToJson(Session));
+	
+	FString out;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&out);
+	if (FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+	{
+		Writer->Close();
+		return out;
+	}
+	
+	UE_LOG(LogMetricFlow, Error, TEXT("MetricFlowJson::SerializeUpsertSessionToString: Failed to serialize JSON"));
 	return FString();
 }
