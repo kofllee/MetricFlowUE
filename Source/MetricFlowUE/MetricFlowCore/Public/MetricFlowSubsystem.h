@@ -64,6 +64,7 @@ private:
 	FString SessionEndedAtUTC;
 
 	TArray<FMetricFlowEvent> EventQueue;
+	int64 EventSeq = 0;
 	int32 MaxQueueSize = 2000;
 	int32 BatchSize;
 
@@ -86,6 +87,6 @@ private:
 	void LoadProvidersFromSettings(const UMetricFlowSettings* Settings);
 	void RebuildSessionContextCache();
 	
-	static FMetricFlowEvent CreateMetricFlowEvent(const FName& EventName, const FMetricFlowFields& ExtraContext,
+	static FMetricFlowEvent CreateMetricFlowEvent(const FName& EventName, const int64 Seq, const FMetricFlowFields& ExtraContext,
 		const FMetricFlowFields& Payload, const FString& SheetOverride);
 };

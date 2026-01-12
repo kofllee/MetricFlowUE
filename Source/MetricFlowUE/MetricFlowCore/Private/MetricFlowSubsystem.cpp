@@ -54,6 +54,7 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	MaxQueueSize = Settings->MaxQueueSize;
 	BatchSize = FMath::Max(1, Settings->BatchSize);
+	EventSeq = 0;
 
 	TimeoutSeconds = Settings->RequestTimeoutSeconds;
 
@@ -134,7 +135,8 @@ void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlow
 		EventContext = EventContext.AddMap(ProviderFields);
 	}
 	
-	const FMetricFlowEvent Event = CreateMetricFlowEvent(EventName, EventContext + ExtraContext, Payload, SheetOverride);
+	const FMetricFlowEvent Event = CreateMetricFlowEvent(EventName, EventSeq, EventContext + ExtraContext, Payload, SheetOverride);
+	EventSeq++;
 	
 	EventQueue.Add(Event);
 	const int32 Overflow = EventQueue.Num() - MaxQueueSize;
@@ -152,7 +154,7 @@ void UMetricFlowSubsystem::RecordEventMap(const FName& EventName, const TMap<FSt
 }
 
 
-FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventName, const FMetricFlowFields& Context,
+FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventName, const int64 Seq, const FMetricFlowFields& Context,
 	const FMetricFlowFields& Payload, const FString& SheetOverride)
 {
 	FMetricFlowEvent Event = FMetricFlowEvent();
@@ -160,6 +162,7 @@ FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventN
 	Event.EventName = EventName;
 	Event.Context = Context;
 	Event.TimestampUTC = FDateTime::UtcNow();
+	Event.SequenceNumber = Seq;
 	Event.Payload = Payload;
 	Event.SheetOverride = SheetOverride;
 	return Event;
