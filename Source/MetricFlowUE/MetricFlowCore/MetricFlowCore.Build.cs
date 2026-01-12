@@ -36,6 +36,7 @@ public class MetricFlowCore : ModuleRules
 			{
 				"CoreUObject",
 				"Engine",
+				"Projects",
 				"Slate",
 				"SlateCore",
 				"DeveloperSettings",
