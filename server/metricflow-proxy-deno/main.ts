@@ -7,14 +7,28 @@ function corsHeaders(){
     }
 }
 
-function json(resBody: unknown, status = 200){
-    return new Response(JSON.stringify(resBody), {
+function response(body: unknown, status = 200){
+    return new Response(JSON.stringify(body), {
         status,
         headers: {
             "content-type": "application/json; charset=utf-8",
             ...corsHeaders(),
         }
-    })
+    });
+}
+
+function err(httpStatus: number, code: string, message: string, details?: unknown, requestId?: string){
+    const payload: any = {
+        ok: false,
+        error: { httpStatus, code, message },
+        requestId
+    };
+    if(details !== undefined){ payload.error.details = details; }
+    return response(payload, httpStatus);
+}
+
+function ok(data: unknown, requestId?: string){
+    return response({ ok: true, data, requestId }, 200);
 }
 
 function isValidPorjectId(v: unknown): v is string{
@@ -37,25 +51,32 @@ function loadRoutesFromEnv(): Record<string, string> {
 const ROUTES = loadRoutesFromEnv();
 const PROXY_API_KEY = Deno.env.get("PROXY_API_KEY") ?? "";
 
+function makeRequestId() {
+  return crypto.randomUUID();
+}
+
 export async function handler(req: Request): Promise<Response>{
+    const requestId = makeRequestId();
+
     if(req.method === "OPTIONS"){
         return new Response(null, {status: 204, headers: corsHeaders()});
     }
 
     if(req.method !== "POST"){
-        return json({ error: "Method not allowed" }, 405);
+        return err(405, "method_not_allowed", "Method not allowed", { method: req.method }, requestId);
     }
 
     if(PROXY_API_KEY){
         const key = req.headers.get("x-api-key") ?? "";
         if(key !== PROXY_API_KEY){
-            return json({ error: "Unauthorized"}, 401);
+            return err(401, "unauthorized", "Unauthorized", undefined, requestId);
+            
         }
     }
 
     const ct = req.headers.get("content-type") ?? "";
     if(!ct.includes("application/json")){
-        return json({ error: "Expected application/json"}, 415)
+        return err(415, "unsupported_media_type", "Expected application/json", { contentType: ct }, requestId);
     }
 
     
@@ -63,20 +84,21 @@ export async function handler(req: Request): Promise<Response>{
     try{
         body = await req.json();
     } catch {
-        return json({error: "Invalid JSON"}, 400);
+        return err(400, "invalid_json", "Invalid JSON", undefined, requestId);
     }
 
     const projectId = body?.projectId;
     if(!isValidPorjectId(projectId)){
-        return json( { error: "Invalid projectId" }, 400);
+        return err(400, "invalid_project_id", "Invalid projectId", { projectId }, requestId);
     }
 
     const targetUrl = ROUTES[projectId];
     if(!targetUrl){
-        return json({ error: "Unknown projectId", projectId }, 404);
+        return err(404, "unknown_project_id", "Unknown projectId", { projectId }, requestId);
     }
 
     let upstream: Response;
+    let upstreamText = "";
     try{
         upstream = await fetch(targetUrl, {
             method: "POST",
@@ -85,18 +107,44 @@ export async function handler(req: Request): Promise<Response>{
             },
             body: JSON.stringify(body)
         });
+        upstreamText = await upstream.text();
     } catch(e) {
-        return json({ erorr: "Upstream fetch failed", projectId, details: String(e)}, 502);
+        return err(502, "upstream_fetch_failed", "Upstream fetch failed", { projectId, details: String(e) }, requestId);
     }
 
-    const upstreamText = await upstream.text();
-    return json({
-        ok: upstream.ok,
-        projectId,
-        upstreamStatus: upstream.status,
-        upstreamBody: upstreamText
-    },
-    upstream.ok ? 200 : 502);
+    let upstreamJson: any = null;
+    try{
+        upstreamJson = JSON.parse(upstreamText);
+    }
+    catch{
+        return err(
+            502, 
+            "upstream_invalid_json", 
+            "Upstream returned invalid JSON", 
+            { projectId, upstreamStatus: upstream.status, upstreamBody: upstreamText }, 
+            requestId
+        );
+    }
+
+    if(upstreamJson?.ok === true){
+        return ok(upstreamJson.data, requestId);
+    }
+
+    if(upstreamJson?.ok === false){
+        const hs = Number(upstreamJson?.error?.httpStatus);
+        const mappedStatus = Number.isFinite(hs) ? hs : 502;
+
+        const payload = { ...upstreamJson, requestId };
+        return response(payload, mappedStatus);
+    }
+
+    return err(
+        502, 
+        "upstream_bad_response", 
+        "Upstream returned unexpected JSON shape", 
+        { projectId, upstreamStatus: upstream.status, upstreamBody: upstreamJson }, 
+        requestId
+    );
 }
 
 export function startServer(port = 8000){
