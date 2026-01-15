@@ -25,7 +25,6 @@ function getEventsHeader_() {
     "seq",
     "timestampUTC",
     "eventName",
-    "sheet",
     "eventContextJson",
     "payloadJson",
     "receivedAtUTC",
@@ -96,13 +95,40 @@ function handleUpsertSession(body){
     sh.getRange(rowNumber, 1, 1, header.length).setValues([row]);
     return resOk({ op: body.op, sessionId: s.sessionId, action: "update", rowNumber });
   }
-  else{
-    sh.appendRow(row);
-    return resOk({ op: body.op, sessionId: s.sessionId, action: "insert" });
-  }
+
+  sh.appendRow(row);
+  return resOk({ op: body.op, sessionId: s.sessionId, action: "insert" });
+
 }
 
 function handleAppendEvents(body){
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const defaultSh = ensureSheetWithHeader_(ss, CONFIG.EVENTS_SHEET, getEventsHeader_());
+  const header = getEventsHeader_();
+
+  for(let i = 0; i < body.events.length; i++){
+    const ev = body.events[i];
+    const values = {
+      projectId: body.projectId,
+      sessionId: body.sessionId,
+      seq: ev.seq,
+      timestampUTC: ev.timestampUTC,
+      eventName: ev.eventName,
+      eventContextJson: ev.eventContext ? JSON.stringify(ev.eventContext) : "",
+      payloadJson: ev.payload ? JSON.stringify(ev.payload) : "",
+      receivedAtUTC: new Date().toISOString()
+    };
+
+    const row = buildRowByHeader_(header, values);
+    defaultSh.appendRow(row);
+
+    if(ev.sheet){
+      const additionSh = ensureSheetWithHeader_(ss, ev.sheet, getEventsHeader_());
+      additionSh.appendRow(row);
+    }
+
+  }
+
   return resOk({ op: body.op, sessionId: body.sessionId, appended: body.events.length });
 }
 
