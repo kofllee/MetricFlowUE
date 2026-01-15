@@ -53,8 +53,10 @@ private:
 	FString ProxyApiKey;
 	
 	FString ActiveEndpointURL;
-	
+
+	UPROPERTY()
 	TArray<TObjectPtr<UMetricFlowContextProviderBase>> SessionContextProviders;
+	UPROPERTY()
 	TArray<TObjectPtr<UMetricFlowContextProviderBase>> EventContextProviders;
 
 	TMap<FString, FString> CachedSessionContext;
