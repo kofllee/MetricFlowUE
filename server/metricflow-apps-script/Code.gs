@@ -1,3 +1,37 @@
+const CONFIG = {
+  SPREADSHEET_ID: SpreadsheetApp.getActiveSpreadsheet().getId(),
+  SESSIONS_SHEET: "AllSessions",
+  EVENTS_SHEET: "AllEvents"
+}
+
+function getSessionsHeader_() {
+  return [
+    "projectId",
+    "sessionId",
+    "startedAtUTC",
+    "endedAtUTC",
+    "projectName",
+    "projectVersion",
+    "platform",
+    "platformVersion",
+    "updatedAtUTC",
+  ];
+}
+
+function getEventsHeader_() {
+  return [
+    "projectId",
+    "sessionId",
+    "seq",
+    "timestampUTC",
+    "eventName",
+    "sheet",
+    "eventContextJson",
+    "payloadJson",
+    "receivedAtUTC",
+  ];
+}
+
 function doPost(e) {
   try{
     const contentType = (e && e.postData && e.postData.type) ? String(e.postData.type) : "";
@@ -18,6 +52,10 @@ function doPost(e) {
     const v = validateBase(body);
     if(!v.ok) return resError(400, v.code, v.message, v.details);
 
+    if(!CONFIG.SPREADSHEET_ID){
+      return resError(500, "missing_spreadsheet_id", "SPREADSHEET_ID is not found");
+    }
+
     switch (body.op){
       case "upsertSession":
           return handleUpsertSession(body);
@@ -31,11 +69,102 @@ function doPost(e) {
 }
 
 function handleUpsertSession(body){
-  return resOk({ op: body.op, sessionId: body.session.sessionId });
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const sh = ensureSheetWithHeader_(ss, CONFIG.SESSIONS_SHEET, getSessionsHeader_());
+  const header = getSessionsHeader_();
+
+  const s = body.session;
+
+  const values = {
+    projectId: body.projectId,
+    sessionId: s.sessionId,
+    startedAtUTC: s.startedAtUTC || "",
+    endedAtUTC: s.endedAtUTC || "",
+    projectName: s.projectName || "",
+    projectVersion: s.projectVersion || "",
+    platform: s.platform || "",
+    platformVersion: s.platformVersion || "",
+    updatedAtUTC: new Date().toISOString(),
+  };
+
+  const row = buildRowByHeader_(header, values);
+
+  const keyMap = { sessionId: s.sessionId };
+  const rowNumber = findRowByKeyMap_(sh, header, keyMap);
+
+  if(rowNumber > 0){
+    sh.getRange(rowNumber, 1, 1, header.length).setValues([row]);
+    return resOk({ op: body.op, sessionId: s.sessionId, action: "update", rowNumber });
+  }
+  else{
+    sh.appendRow(row);
+    return resOk({ op: body.op, sessionId: s.sessionId, action: "insert" });
+  }
 }
 
 function handleAppendEvents(body){
   return resOk({ op: body.op, sessionId: body.sessionId, appended: body.events.length });
+}
+
+function ensureSheetWithHeader_(ss, name, header){
+  const safeName = sanitizeSheetName_(name);
+  let sh = ss.getSheetByName(safeName);
+  if(!sh) sh = ss.insertSheet(safeName);
+
+  const lastRow = sh.getLastRow();
+  if(lastRow === 0){
+    sh.getRange(1, 1, 1, header.length).setValues([header]);
+    return sh;
+  }
+
+  return sh;
+}
+
+function sanitizeSheetName_(name){
+  let s = String(name || "").trim();
+  if(!s) return "";
+  s = s.replace(/[\[\]\:\*\?\/\\]/g, "_");
+  if (s.length > 100) s = s.slice(0, 100);
+  return s;
+}
+
+function findRowByKeyMap_(sh, header, keyMap){
+  const idx = {};
+  for(let i = 0; i < header.length; i++) idx[header[i]] = i;
+
+  const lastRow = sh.getLastRow();
+  if(lastRow < 2) return -1;
+
+  const data = sh.getRange(2, 1, lastRow - 1, header.length).getValues();
+
+  for(let r = 0; r < data.length; r++){
+    let match = true;
+    for (const key in keyMap){
+      let col = idx[key];
+      if(col === undefined) throw new Error("Unknown key column: " + key);
+      
+      const a = String(data[r][col] || "");
+      const b = String(keyMap[key] || "");
+      if(a !== b){
+        match = false;
+        break;
+      }
+    }
+    if(match) return r + 2;
+  }
+
+  return -1;
+}
+
+function buildRowByHeader_(header, valuesByColumn){
+  const row = new Array(header.length);
+
+  for(let i = 0; i < header.length; i++){
+    const colName = header[i];
+    row[i] = (valuesByColumn && colName in valuesByColumn) ? valuesByColumn[colName] : "";
+  }
+
+  return row;
 }
 
 function validateBase(body) {
