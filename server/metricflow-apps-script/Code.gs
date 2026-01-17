@@ -71,6 +71,7 @@ function handleUpsertSession(body){
   const dynamicHeader = buildSessionsHeaderFromBody_(body);
   const sh = ensureSheetWithHeader_(ss, CONFIG.SESSIONS_SHEET, dynamicHeader);
   const header = getSheetHeader_(sh);
+  const idx = makeHeaderIndex_(header);
 
   const s = body.session;
 
@@ -85,7 +86,7 @@ function handleUpsertSession(body){
     values[k] = (s[k] === undefined || s[k] === null) ? "" : String(s[k]);
   }
 
-  const row = buildRowByHeader_(header, values);
+  const row = buildRowFast_(header.length, idx, values);
 
   const keyMap = { sessionId: body.sessionId };
   const rowNumber = findRowByKeyMap_(sh, header, keyMap);
@@ -100,47 +101,72 @@ function handleUpsertSession(body){
 
 }
 
-function handleAppendEvents(body){
+function handleAppendEvents(body) {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const defaultSh = ensureSheetWithHeader_(ss, CONFIG.EVENTS_SHEET, getDefaultEventsHeader_());
-  const header = getSheetHeader_(defaultSh);
-
   const sessionSh = ss.getSheetByName(CONFIG.SESSIONS_SHEET);
 
-  for(let i = 0; i < body.events.length; i++){
+  const sessionIdCell = makeSessionIdCell_(ss, sessionSh, body.sessionId);
+
+  const defaultSh = ensureSheetWithHeader_(ss, CONFIG.EVENTS_SHEET, getDefaultEventsHeader_());
+  const defaultHeader = getSheetHeader_(defaultSh);
+  const defaultIdx = makeHeaderIndex_(defaultHeader);
+
+  const extraMap = Object.create(null);
+
+  const defaultRows = [];
+  const receivedAt = new Date().toISOString();
+
+  for (let i = 0; i < body.events.length; i++) {
     const ev = body.events[i];
+
     const values = {
       projectId: body.projectId,
-      sessionId: makeSessionIdCell_(ss, sessionSh, body.sessionId),
+      sessionId: sessionIdCell,
       seq: ev.seq,
       timestampUTC: ev.timestampUTC,
       eventName: ev.eventName,
       eventContextJson: ev.eventContext ? JSON.stringify(ev.eventContext) : "",
       payloadJson: ev.payload ? JSON.stringify(ev.payload) : "",
-      receivedAtUTC: new Date().toISOString()
+      receivedAtUTC: receivedAt
     };
 
-    applyObjectFields_(values, ev.payload, header);
-    applyObjectFields_(values, ev.eventContext, header);
+    applyObjectFields_(values, ev.payload, defaultHeader);
+    applyObjectFields_(values, ev.eventContext, defaultHeader);
 
-    const row = buildRowByHeader_(header, values);
-    defaultSh.appendRow(row);
+    defaultRows.push(buildRowFast_(defaultHeader.length, defaultIdx, values));
 
     if (Array.isArray(ev.extraSheets) && ev.extraSheets.length > 0) {
-      const uniq = [...new Set(
-        ev.extraSheets
-          .filter(s => typeof s === 'string')
-          .map(s => s.trim())
-          .filter(s => s.length > 0)
-      )];
+      for (let j = 0; j < ev.extraSheets.length; j++) {
+        const rawName = ev.extraSheets[j];
+        if (typeof rawName !== "string") continue;
+        const sheetName = rawName.trim();
+        if (!sheetName) continue;
 
-      for (const sheetName of uniq) {
-        const additionSh = ensureSheetWithHeader_(ss, sheetName, getDefaultEventsHeader_(), false);
-        const additionHeader = getSheetHeader_(additionSh);
-        const additionRow = buildRowByHeader_(additionHeader, values);
-        additionSh.appendRow(additionRow);
+        let bucket = extraMap[sheetName];
+        if (!bucket) {
+          const sh = ensureSheetWithHeader_(ss, sheetName, getDefaultEventsHeader_(), false);
+          const header = getSheetHeader_(sh);
+          const idx = makeHeaderIndex_(header);
+
+          bucket = extraMap[sheetName] = { sh, header, idx, rows: [] };
+        }
+
+        bucket.rows.push(buildRowFast_(bucket.header.length, bucket.idx, values));
       }
     }
+  }
+
+  if (defaultRows.length > 0) {
+    const startRow = defaultSh.getLastRow() + 1;
+    defaultSh.getRange(startRow, 1, defaultRows.length, defaultHeader.length).setValues(defaultRows);
+  }
+
+  for (const sheetName in extraMap) {
+    const bucket = extraMap[sheetName];
+    if (!bucket.rows.length) continue;
+
+    const startRow = bucket.sh.getLastRow() + 1;
+    bucket.sh.getRange(startRow, 1, bucket.rows.length, bucket.header.length).setValues(bucket.rows);
   }
 
   return resOk({ op: body.op, sessionId: body.sessionId, appended: body.events.length });
@@ -252,14 +278,19 @@ function applyObjectFields_(values, obj, header) {
   }
 }
 
-function buildRowByHeader_(header, valuesByColumn){
-  const row = new Array(header.length);
 
-  for(let i = 0; i < header.length; i++){
-    const colName = header[i];
-    row[i] = (valuesByColumn && colName in valuesByColumn) ? valuesByColumn[colName] : "";
+function makeHeaderIndex_(header){
+  const map = Object.create(null);
+  for (let i = 0; i < header.length; i++) map[header[i]] = i;
+  return map;
+}
+
+function buildRowFast_(headerLen, idx, values){
+  const row = new Array(headerLen).fill("");
+  for (const k in values) {
+    const c = idx[k];
+    if (c !== undefined) row[c] = values[k];
   }
-
   return row;
 }
 
