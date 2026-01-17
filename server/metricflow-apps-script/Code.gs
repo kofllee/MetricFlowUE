@@ -120,6 +120,9 @@ function handleAppendEvents(body){
       receivedAtUTC: new Date().toISOString()
     };
 
+    applyObjectFields_(values, ev.payload, header);
+    applyObjectFields_(values, ev.eventContext, header);
+
     const row = buildRowByHeader_(header, values);
     defaultSh.appendRow(row);
 
@@ -226,6 +229,16 @@ function makeSessionIdCell_(ss, sh, sessionId){
   const gid = sh.getSheetId();
   const url = ss.getUrl() + "#gid=" + gid + "&range=" + colLetter + row;
   return '=HYPERLINK("' + url + '","' + String(sessionId).replace(/"/g,'""') + '")';
+}
+
+function applyObjectFields_(values, obj, header) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return;
+
+  for (const key in obj) {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+    
+    values[key] = obj[key];
+  }
 }
 
 function buildRowByHeader_(header, valuesByColumn){
