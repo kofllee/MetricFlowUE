@@ -105,11 +105,13 @@ function handleAppendEvents(body){
   const defaultSh = ensureSheetWithHeader_(ss, CONFIG.EVENTS_SHEET, getDefaultEventsHeader_());
   const header = getSheetHeader_(defaultSh);
 
+  const sessionSh = ss.getSheetByName(CONFIG.SESSIONS_SHEET);
+
   for(let i = 0; i < body.events.length; i++){
     const ev = body.events[i];
     const values = {
       projectId: body.projectId,
-      sessionId: body.sessionId,
+      sessionId: makeSessionIdCell_(ss, sessionSh, body.sessionId),
       seq: ev.seq,
       timestampUTC: ev.timestampUTC,
       eventName: ev.eventName,
@@ -145,7 +147,7 @@ function ensureSheetWithHeader_(ss, name, header) {
     return sh;
   }
 
-  const lastCol = Math.max(sh.getLastColumn(), header.length);
+  const lastCol = sh.getLastColumn();
   const current = sh.getRange(1, 1, 1, lastCol).getValues()[0]
     .map(v => String(v || "").trim());
 
@@ -153,7 +155,7 @@ function ensureSheetWithHeader_(ss, name, header) {
   const toAdd = header.filter(h => !existing.has(h));
 
   if (toAdd.length > 0) {
-    const startCol = current.length + 1; // дописываем справа от текущей ширины
+    const startCol = current.length + 1;
     sh.getRange(1, startCol, 1, toAdd.length).setValues([toAdd]);
   }
 
@@ -209,6 +211,23 @@ function findRowByKeyMap_(sh, header, keyMap){
   return -1;
 }
 
+function makeSessionIdCell_(ss, sh, sessionId){
+  if(!sh) return sessionId;
+
+  const header = getSheetHeader_(sh);
+  const row = findRowByKeyMap_(sh, header, { sessionId: sessionId });
+  if(row < 0) return sessionId;
+
+  const colIdx = header.indexOf("sessionId");
+  if(colIdx < 0) return sessionId;
+
+  const colLetter = columnToLetter_(colIdx + 1);
+
+  const gid = sh.getSheetId();
+  const url = ss.getUrl() + "#gid=" + gid + "&range=" + colLetter + row;
+  return '=HYPERLINK("' + url + '","' + String(sessionId).replace(/"/g,'""') + '")';
+}
+
 function buildRowByHeader_(header, valuesByColumn){
   const row = new Array(header.length);
 
@@ -262,6 +281,15 @@ function validateAppendEvents(body) {
   return ok();
 }
 
+function columnToLetter_(col){
+  let letter = "";
+  while(col > 0){
+    let temp = (col - 1) % 26;
+    letter = String.fromCharCode(temp + 65) + letter;
+    col = (col - temp - 1) / 26;
+  }
+  return letter;
+}
 
 function resOk(data) {
   return ContentService
