@@ -170,12 +170,11 @@ FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventN
 bool UMetricFlowSubsystem::BuildUpsertSessionRequest(FMetricFlowPendingRequest& OutReq)
 {
 	FMetricFlowFields Session = FMetricFlowFields();
-	Session.AddString(TEXT("sessionId"), SessionId);
 	Session.AddString(TEXT("startedAtUTC"), SessionStartedAtUTC);
 	Session.AddString(TEXT("endedAtUTC"), SessionEndedAtUTC);
 	Session.AddMap(CachedSessionContext);
 
-	const FString Json = MetricFlowJson::SerializeUpsertSessionToString(ProjectId, Session);
+	const FString Json = MetricFlowJson::SerializeUpsertSessionToString(ProjectId, SessionId, Session);
 	if (Json.IsEmpty()) return false;
 
 	OutReq = FMetricFlowPendingRequest();

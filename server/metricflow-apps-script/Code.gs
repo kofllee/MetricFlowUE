@@ -23,7 +23,7 @@ function buildSessionsHeaderFromBody_(body){
     .map(k => String(k).trim())
     .filter(k => k.length > 0);
 
-    const header = ["projectId", ...sessionKeys, "updatedAtUTC"];
+    const header = ["projectId", "sessionId", ...sessionKeys, "updatedAtUTC"];
 
     const seen = new Set();
     return header.filter(h => (seen.has(h) ? false : (seen.add(h), true)));
@@ -76,6 +76,7 @@ function handleUpsertSession(body){
 
   const values = {
     projectId: body.projectId,
+    sessionId: body.sessionId,
     updatedAtUTC: new Date().toISOString(),
   };
   const keys = Object.keys(s);
@@ -86,16 +87,16 @@ function handleUpsertSession(body){
 
   const row = buildRowByHeader_(header, values);
 
-  const keyMap = { sessionId: s.sessionId };
+  const keyMap = { sessionId: body.sessionId };
   const rowNumber = findRowByKeyMap_(sh, header, keyMap);
 
   if(rowNumber > 0){
     sh.getRange(rowNumber, 1, 1, header.length).setValues([row]);
-    return resOk({ op: body.op, sessionId: s.sessionId, action: "update", rowNumber });
+    return resOk({ op: body.op, sessionId: body.sessionId, action: "update", rowNumber });
   }
 
   sh.appendRow(row);
-  return resOk({ op: body.op, sessionId: s.sessionId, action: "insert" });
+  return resOk({ op: body.op, sessionId: body.sessionId, action: "insert" });
 
 }
 
@@ -224,6 +225,7 @@ function validateBase(body) {
 
   if (!isNonEmptyStr(body.projectId)) return bad("invalid_project_id", "projectId is required");
   if (!isNonEmptyStr(body.op)) return bad("invalid_op", "op is required");
+  if (!isNonEmptyStr(body.sessionId)) return bad("invalid_session_id", "sessionId is required");
 
   if (body.op === "upsertSession") return validateUpsertSession(body);
   if (body.op === "appendEvents") return validateAppendEvents(body);
@@ -235,7 +237,6 @@ function validateUpsertSession(body) {
   const s = body.session;
   if (!isObj(s)) return bad("invalid_session", "session must be an object");
 
-  if (!isNonEmptyStr(s.sessionId)) return bad("invalid_session_id", "session.sessionId is required");
   if (!isNonEmptyStr(s.startedAtUTC)) return bad("invalid_startedAtUTC", "session.startedAtUTC is required");
 
   if (s.endedAtUTC !== undefined && !isStr(s.endedAtUTC)) {
@@ -246,7 +247,6 @@ function validateUpsertSession(body) {
 }
 
 function validateAppendEvents(body) {
-  if (!isNonEmptyStr(body.sessionId)) return bad("invalid_session_id", "sessionId is required");
   if (!Array.isArray(body.events)) return bad("invalid_events", "events must be an array");
 
   for (let i = 0; i < body.events.length; i++) {

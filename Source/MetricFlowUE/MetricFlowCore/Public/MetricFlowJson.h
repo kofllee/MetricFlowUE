@@ -14,5 +14,6 @@ namespace MetricFlowJson
 
 	FString SerializeUpsertSessionToString(
 		const FString& ProjectId,
+		const FString& SessionId,
 		const FMetricFlowFields& SessionSnapshot);
 }

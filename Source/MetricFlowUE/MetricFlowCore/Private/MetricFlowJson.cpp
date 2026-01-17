@@ -55,12 +55,13 @@ FString MetricFlowJson::SerializeAppendEventsToString(const FString& ProjectId, 
 	return FString();
 }
 
-FString MetricFlowJson::SerializeUpsertSessionToString(const FString& ProjectId,
+FString MetricFlowJson::SerializeUpsertSessionToString(const FString& ProjectId, const FString& SessionId,
 	const FMetricFlowFields& Session)
 {
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetStringField(TEXT("projectId"),	ProjectId);
 	Root->SetStringField(TEXT("op"),	TEXT("upsertSession"));
+	Root->SetStringField(TEXT("sessionId"), SessionId);
 	Root->SetObjectField(TEXT("session"), SerializeFieldsToJson(Session));
 	
 	FString out;
