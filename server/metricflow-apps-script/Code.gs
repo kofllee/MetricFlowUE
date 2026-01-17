@@ -4,31 +4,29 @@ const CONFIG = {
   EVENTS_SHEET: "AllEvents"
 }
 
-function getSessionsHeader_() {
-  return [
-    "projectId",
-    "sessionId",
-    "startedAtUTC",
-    "endedAtUTC",
-    "projectName",
-    "projectVersion",
-    "platform",
-    "platformVersion",
-    "updatedAtUTC",
-  ];
+function getDefaultEventsHeader_() { 
+  return [ 
+    "projectId", 
+    "sessionId", 
+    "seq", 
+    "timestampUTC", 
+    "eventName", 
+    "eventContextJson", 
+    "payloadJson", 
+    "receivedAtUTC", ]; 
 }
 
-function getEventsHeader_() {
-  return [
-    "projectId",
-    "sessionId",
-    "seq",
-    "timestampUTC",
-    "eventName",
-    "eventContextJson",
-    "payloadJson",
-    "receivedAtUTC",
-  ];
+function buildSessionsHeaderFromBody_(body){
+  const s = (body && body.session && typeof body.session === "object") ? body.session : {};
+
+  const sessionKeys = Object.keys(s)
+    .map(k => String(k).trim())
+    .filter(k => k.length > 0);
+
+    const header = ["projectId", ...sessionKeys, "updatedAtUTC"];
+
+    const seen = new Set();
+    return header.filter(h => (seen.has(h) ? false : (seen.add(h), true)));
 }
 
 function doPost(e) {
@@ -69,22 +67,22 @@ function doPost(e) {
 
 function handleUpsertSession(body){
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const sh = ensureSheetWithHeader_(ss, CONFIG.SESSIONS_SHEET, getSessionsHeader_());
-  const header = getSessionsHeader_();
+
+  const dynamicHeader = buildSessionsHeaderFromBody_(body);
+  const sh = ensureSheetWithHeader_(ss, CONFIG.SESSIONS_SHEET, dynamicHeader);
+  const header = getSheetHeader_(sh);
 
   const s = body.session;
 
   const values = {
     projectId: body.projectId,
-    sessionId: s.sessionId,
-    startedAtUTC: s.startedAtUTC || "",
-    endedAtUTC: s.endedAtUTC || "",
-    projectName: s.projectName || "",
-    projectVersion: s.projectVersion || "",
-    platform: s.platform || "",
-    platformVersion: s.platformVersion || "",
     updatedAtUTC: new Date().toISOString(),
   };
+  const keys = Object.keys(s);
+  for(let i = 0; i < keys.length; i++){
+    const k = keys[i];
+    values[k] = (s[k] === undefined || s[k] === null) ? "" : String(s[k]);
+  }
 
   const row = buildRowByHeader_(header, values);
 
@@ -103,8 +101,8 @@ function handleUpsertSession(body){
 
 function handleAppendEvents(body){
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  const defaultSh = ensureSheetWithHeader_(ss, CONFIG.EVENTS_SHEET, getEventsHeader_());
-  const header = getEventsHeader_();
+  const defaultSh = ensureSheetWithHeader_(ss, CONFIG.EVENTS_SHEET, getDefaultEventsHeader_());
+  const header = getSheetHeader_(defaultSh);
 
   for(let i = 0; i < body.events.length; i++){
     const ev = body.events[i];
@@ -123,8 +121,11 @@ function handleAppendEvents(body){
     defaultSh.appendRow(row);
 
     if(ev.sheet){
-      const additionSh = ensureSheetWithHeader_(ss, ev.sheet, getEventsHeader_());
-      additionSh.appendRow(row);
+      const additionSh = ensureSheetWithHeader_(ss, ev.sheet, getDefaultEventsHeader_());
+      const additionHeader = getSheetHeader_(additionSh);
+      const additionRow = buildRowByHeader_(additionHeader, values);
+
+      additionSh.appendRow(additionRow);
     }
 
   }
@@ -132,15 +133,27 @@ function handleAppendEvents(body){
   return resOk({ op: body.op, sessionId: body.sessionId, appended: body.events.length });
 }
 
-function ensureSheetWithHeader_(ss, name, header){
+function ensureSheetWithHeader_(ss, name, header) {
   const safeName = sanitizeSheetName_(name);
   let sh = ss.getSheetByName(safeName);
-  if(!sh) sh = ss.insertSheet(safeName);
+  if (!sh) sh = ss.insertSheet(safeName);
 
   const lastRow = sh.getLastRow();
-  if(lastRow === 0){
+  if (lastRow === 0) {
     sh.getRange(1, 1, 1, header.length).setValues([header]);
     return sh;
+  }
+
+  const lastCol = Math.max(sh.getLastColumn(), header.length);
+  const current = sh.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(v => String(v || "").trim());
+
+  const existing = new Set(current.filter(v => v.length > 0));
+  const toAdd = header.filter(h => !existing.has(h));
+
+  if (toAdd.length > 0) {
+    const startCol = current.length + 1; // дописываем справа от текущей ширины
+    sh.getRange(1, startCol, 1, toAdd.length).setValues([toAdd]);
   }
 
   return sh;
@@ -152,6 +165,20 @@ function sanitizeSheetName_(name){
   s = s.replace(/[\[\]\:\*\?\/\\]/g, "_");
   if (s.length > 100) s = s.slice(0, 100);
   return s;
+}
+
+function getSheetHeader_(sh) {
+  const lastRow = sh.getLastRow();
+  if (lastRow === 0) return [];
+
+  const lastCol = sh.getLastColumn();
+  if (lastCol === 0) return [];
+
+  return sh
+    .getRange(1, 1, 1, lastCol)
+    .getValues()[0]
+    .map(v => String(v || "").trim())
+    .filter(v => v.length > 0);
 }
 
 function findRowByKeyMap_(sh, header, keyMap){
