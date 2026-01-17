@@ -124,7 +124,7 @@ void UMetricFlowSubsystem::Deinitialize()
 }
 
 
-void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlowFields& ExtraContext, const FMetricFlowFields& Payload, const FString& SheetOverride)
+void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlowFields& ExtraContext, const FMetricFlowFields& Payload, const TArray<FString>& ExtraSheets)
 {
 	FMetricFlowFields EventContext;
 	for (const UMetricFlowContextProviderBase* Provider : EventContextProviders)
@@ -134,7 +134,7 @@ void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlow
 		EventContext = EventContext.AddMap(ProviderFields);
 	}
 	
-	const FMetricFlowEvent Event = CreateMetricFlowEvent(EventName, EventSeq, EventContext + ExtraContext, Payload, SheetOverride);
+	const FMetricFlowEvent Event = CreateMetricFlowEvent(EventName, EventSeq, EventContext + ExtraContext, Payload, ExtraSheets);
 	EventSeq++;
 	
 	EventQueue.Add(Event);
@@ -143,18 +143,18 @@ void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlow
 		EventQueue.RemoveAt(0, Overflow, EAllowShrinking::No);
 }
 
-void UMetricFlowSubsystem::RecordEventMap(const FName& EventName, const TMap<FString, FString>& ExtraContextMap, const TMap<FString, FString>& PayloadMap, const FString& SheetOverride)
+void UMetricFlowSubsystem::RecordEventMap(const FName& EventName, const TMap<FString, FString>& ExtraContextMap, const TMap<FString, FString>& PayloadMap, const TArray<FString>& ExtraSheets)
 {
 	
 	const FMetricFlowFields ExtraContext = FMetricFlowFields().AddMap(ExtraContextMap);
 	const FMetricFlowFields Payload = FMetricFlowFields().AddMap(PayloadMap);
 
-	RecordEvent(EventName, ExtraContext, Payload, SheetOverride);
+	RecordEvent(EventName, ExtraContext, Payload, ExtraSheets);
 }
 
 
 FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventName, const int64 Seq, const FMetricFlowFields& Context,
-	const FMetricFlowFields& Payload, const FString& SheetOverride)
+	const FMetricFlowFields& Payload, const TArray<FString>& ExtraSheets)
 {
 	FMetricFlowEvent Event = FMetricFlowEvent();
 	
@@ -163,7 +163,7 @@ FMetricFlowEvent UMetricFlowSubsystem::CreateMetricFlowEvent(const FName& EventN
 	Event.TimestampUTC = FDateTime::UtcNow();
 	Event.SequenceNumber = Seq;
 	Event.Payload = Payload;
-	Event.SheetOverride = SheetOverride;
+	Event.ExtraSheets = ExtraSheets;
 	return Event;
 }
 

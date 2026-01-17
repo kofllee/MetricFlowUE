@@ -24,5 +24,5 @@ public:
 	FMetricFlowFields Payload;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Metric Flow")
-	FString SheetOverride;
+	TArray<FString> ExtraSheets;
 };

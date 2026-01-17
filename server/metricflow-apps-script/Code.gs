@@ -126,20 +126,27 @@ function handleAppendEvents(body){
     const row = buildRowByHeader_(header, values);
     defaultSh.appendRow(row);
 
-    if(ev.sheet){
-      const additionSh = ensureSheetWithHeader_(ss, ev.sheet, getDefaultEventsHeader_());
-      const additionHeader = getSheetHeader_(additionSh);
-      const additionRow = buildRowByHeader_(additionHeader, values);
+    if (Array.isArray(ev.extraSheets) && ev.extraSheets.length > 0) {
+      const uniq = [...new Set(
+        ev.extraSheets
+          .filter(s => typeof s === 'string')
+          .map(s => s.trim())
+          .filter(s => s.length > 0)
+      )];
 
-      additionSh.appendRow(additionRow);
+      for (const sheetName of uniq) {
+        const additionSh = ensureSheetWithHeader_(ss, sheetName, getDefaultEventsHeader_(), false);
+        const additionHeader = getSheetHeader_(additionSh);
+        const additionRow = buildRowByHeader_(additionHeader, values);
+        additionSh.appendRow(additionRow);
+      }
     }
-
   }
 
   return resOk({ op: body.op, sessionId: body.sessionId, appended: body.events.length });
 }
 
-function ensureSheetWithHeader_(ss, name, header) {
+function ensureSheetWithHeader_(ss, name, header, expandHeader = true) {
   const safeName = sanitizeSheetName_(name);
   let sh = ss.getSheetByName(safeName);
   if (!sh) sh = ss.insertSheet(safeName);
@@ -147,6 +154,10 @@ function ensureSheetWithHeader_(ss, name, header) {
   const lastRow = sh.getLastRow();
   if (lastRow === 0) {
     sh.getRange(1, 1, 1, header.length).setValues([header]);
+    return sh;
+  }
+
+  if (!expandHeader) {
     return sh;
   }
 

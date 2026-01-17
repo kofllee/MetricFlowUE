@@ -42,9 +42,9 @@ public:
 	virtual void Deinitialize() override;
 
 	UFUNCTION(BlueprintCallable, Category="Metric Flow")
-	void RecordEvent(const FName& EventName, const FMetricFlowFields& ExtraContext, const FMetricFlowFields& Payload, const FString& SheetOverride);
+	void RecordEvent(const FName& EventName, const FMetricFlowFields& ExtraContext, const FMetricFlowFields& Payload, const TArray<FString>& ExtraSheets);
 	UFUNCTION(BlueprintCallable, Category="Metric Flow")
-	void RecordEventMap(const FName& EventName, const TMap<FString, FString>& ExtraContextMap, const TMap<FString, FString>& PayloadMap, const FString& SheetOverride);
+	void RecordEventMap(const FName& EventName, const TMap<FString, FString>& ExtraContextMap, const TMap<FString, FString>& PayloadMap, const TArray<FString>& ExtraSheets);
 
 private:
 	bool bEnabledRuntime = true;
@@ -90,5 +90,5 @@ private:
 	void RebuildSessionContextCache();
 	
 	static FMetricFlowEvent CreateMetricFlowEvent(const FName& EventName, const int64 Seq, const FMetricFlowFields& ExtraContext,
-		const FMetricFlowFields& Payload, const FString& SheetOverride);
+		const FMetricFlowFields& Payload, const TArray<FString>& ExtraSheets);
 };

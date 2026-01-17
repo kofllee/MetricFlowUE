@@ -32,9 +32,16 @@ FString MetricFlowJson::SerializeAppendEventsToString(const FString& ProjectId, 
 		JsonEvent->SetStringField(TEXT("timestampUTC"), Event.TimestampUTC.ToIso8601());
 		JsonEvent->SetStringField(TEXT("seq"), LexToString(Event.SequenceNumber));
 		JsonEvent->SetObjectField(TEXT("eventContext"), SerializeFieldsToJson(Event.Context));
-		if (!Event.SheetOverride.IsEmpty())
+		TArray<TSharedPtr<FJsonValue>> Sheets;
+		for (const FString& Sheet : Event.ExtraSheets)
 		{
-			JsonEvent->SetStringField(TEXT("sheet"), Event.SheetOverride);
+			if (!Sheet.IsEmpty())
+				Sheets.Add(MakeShared<FJsonValueString>(Sheet));
+		}
+
+		if (Sheets.Num() > 0)
+		{
+			JsonEvent->SetArrayField(TEXT("extraSheets"), Sheets);
 		}
 		JsonEvent->SetObjectField(TEXT("payload"), SerializeFieldsToJson(Event.Payload));
 
