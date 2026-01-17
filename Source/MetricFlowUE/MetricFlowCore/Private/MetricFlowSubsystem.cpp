@@ -131,7 +131,6 @@ void UMetricFlowSubsystem::RecordEvent(const FName& EventName, const FMetricFlow
 	{
 		TMap<FString, FString> ProviderFields;
 		Provider->CollectFields(this, ProviderFields);
-		UE_LOG(LogMetricFlow, Verbose, TEXT("EventContext Provider %s fields:"), *Provider->GetName());
 		EventContext = EventContext.AddMap(ProviderFields);
 	}
 	
@@ -194,12 +193,10 @@ bool UMetricFlowSubsystem::BuildAppendEventsRequest(FMetricFlowPendingRequest& O
 	TArray<FMetricFlowEvent> Batch;
 	Batch.Reserve(Count);
 	Batch.Append(EventQueue.GetData(), Count);
-	EventQueue.RemoveAt(0, Count, EAllowShrinking::No);
 
 	const FString Json = MetricFlowJson::SerializeAppendEventsToString(ProjectId, SessionId, Batch);
 	if (Json.IsEmpty())
 	{
-		EventQueue.Insert(Batch, 0);
 		return false;
 	}
 
@@ -213,6 +210,9 @@ bool UMetricFlowSubsystem::BuildAppendEventsRequest(FMetricFlowPendingRequest& O
 
 void UMetricFlowSubsystem::TrySendUpsertSession()
 {
+	if (!bEnabledRuntime) return;
+	if (bIsFlushing) return;
+	
 	FMetricFlowPendingRequest Req;
 	if (!BuildUpsertSessionRequest(Req)) return;
 	SendRequest(MoveTemp(Req));
@@ -222,17 +222,25 @@ void UMetricFlowSubsystem::TrySendAppendEvents()
 {
 	FMetricFlowPendingRequest Req;
 	if (!BuildAppendEventsRequest(Req)) return;
-	SendRequest(MoveTemp(Req));
+	const int32 SentCount = Req.SendBatch.Num();
+	
+	if (!SendRequest(MoveTemp(Req))) return;
+
+	if (SentCount > 0)
+	{
+		EventQueue.RemoveAt(0, SentCount, EAllowShrinking::No);
+	}
 }
 
-void UMetricFlowSubsystem::SendRequest(FMetricFlowPendingRequest Req)
+bool UMetricFlowSubsystem::SendRequest(FMetricFlowPendingRequest Req)
 {
-	if (!bEnabledRuntime) return;
-	if (ActiveEndpointURL.IsEmpty()) return;
-	if (bIsFlushing) return;
+	if (!bEnabledRuntime) return false;
+	if (ActiveEndpointURL.IsEmpty()) return false;
+	if (bIsFlushing) return false;
 	if (Req.Json.IsEmpty())
 	{
 		UE_LOG(LogMetricFlow, Warning, TEXT("UMetricFlowSubsystem::SendRequest: Empty JSON for %s"), ToString(Req.Op));
+		return false;
 	}
 
 	bIsFlushing = true;
@@ -244,6 +252,8 @@ void UMetricFlowSubsystem::SendRequest(FMetricFlowPendingRequest Req)
 			if (!WeakThis.IsValid()) return;
 			WeakThis->OnRequestCompleted(Req, bWasSuccessful, ResponseCode, ResponseBody);
 		});
+
+	return true;
 }
 
 void UMetricFlowSubsystem::OnRequestCompleted(const FMetricFlowPendingRequest& Req, const bool bWasSuccessful, const int32 ResponseCode,

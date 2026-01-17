@@ -82,7 +82,7 @@ private:
 	
 	void TrySendUpsertSession();
 	void TrySendAppendEvents();
-	void SendRequest(FMetricFlowPendingRequest Req);
+	bool SendRequest(FMetricFlowPendingRequest Req);
 	void OnRequestCompleted(const FMetricFlowPendingRequest& Req, const bool bWasSuccessful, const int32 ResponseCode, const FString& ResponseBody);
 
 
