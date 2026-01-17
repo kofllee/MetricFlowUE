@@ -177,8 +177,7 @@ function getSheetHeader_(sh) {
   return sh
     .getRange(1, 1, 1, lastCol)
     .getValues()[0]
-    .map(v => String(v || "").trim())
-    .filter(v => v.length > 0);
+    .map(v => String(v || "").trim());
 }
 
 function findRowByKeyMap_(sh, header, keyMap){
