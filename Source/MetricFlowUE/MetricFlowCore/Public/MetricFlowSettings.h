@@ -48,9 +48,12 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Destination|Shipping", meta=(DisplayName="Shipping Endpoint URL"))
 	FString ShippingEndpointURL;
 
+
+	UPROPERTY(EditAnywhere, Config, Category="Batching", meta=(ClampMin="1", UIMin="1"))
+	int32 MinSendBatchSize = 15;
 	
 	UPROPERTY(EditAnywhere, Config, Category="Batching", meta=(ClampMin="1", UIMin="1"))
-	int32 BatchSize = 20;
+	int32 MaxSendBatchSize = 30;
 
 	UPROPERTY(EditAnywhere, Config, Category="Batching", meta=(ClampMin="0.1", UIMin="0.1"))
 	float FlushIntervalSeconds = 5.0f;
@@ -59,7 +62,7 @@ public:
 	int32 MaxQueueSize = 2000;
 	
 
-	UPROPERTY(EditAnywhere, Config, Category="Reliability", meta=(ClampMin="0.1", UIMin="0.1", ClampMax="60", UIMax="60"))
+	UPROPERTY(EditAnywhere, Config, Category="Reliability", meta=(ClampMin="0.1", UIMin="0.1"))
 	float RequestTimeoutSeconds = 10.0f;
 
 	FString GetActiveEndpointURL() const
@@ -74,5 +77,11 @@ public:
 	{
 		return GetDefault<UMetricFlowSettings>();
 	};
-
+	
+private:
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
+#endif
+	
 };
+

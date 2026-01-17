@@ -53,7 +53,8 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	ActiveEndpointURL = Settings->GetActiveEndpointURL();
 
 	MaxQueueSize = Settings->MaxQueueSize;
-	BatchSize = FMath::Max(1, Settings->BatchSize);
+	MinBatchSize = FMath::Max(1, Settings->MinSendBatchSize);
+	MaxBatchSize = FMath::Max(MinBatchSize, Settings->MaxSendBatchSize);
 	EventSeq = 0;
 
 	TimeoutSeconds = Settings->RequestTimeoutSeconds;
@@ -187,7 +188,8 @@ bool UMetricFlowSubsystem::BuildAppendEventsRequest(FMetricFlowPendingRequest& O
 {
 	if (EventQueue.Num() == 0) return false;
 	
-	const int32 Count = FMath::Min(BatchSize, EventQueue.Num());
+	const int32 Count = FMath::Min(MaxBatchSize, EventQueue.Num());
+	if (Count < MinBatchSize) return false;
 
 	TArray<FMetricFlowEvent> Batch;
 	Batch.Reserve(Count);

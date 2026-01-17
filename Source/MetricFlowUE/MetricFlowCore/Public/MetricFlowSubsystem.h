@@ -68,7 +68,8 @@ private:
 	TArray<FMetricFlowEvent> EventQueue;
 	int64 EventSeq = 0;
 	int32 MaxQueueSize = 2000;
-	int32 BatchSize;
+	int32 MaxBatchSize;
+	int32 MinBatchSize;
 
 	float TimeoutSeconds;
 
