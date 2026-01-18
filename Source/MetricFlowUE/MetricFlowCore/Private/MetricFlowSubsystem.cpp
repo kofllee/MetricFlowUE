@@ -135,6 +135,7 @@ void UMetricFlowSubsystem::Deinitialize()
 		if (UWorld* World = GetWorld())
 		{
 			World->GetTimerManager().ClearTimer(TimerHandle);
+			World->GetTimerManager().ClearTimer(OutboxTimer);
 		}
 		SessionEndedAtUTC = FDateTime::UtcNow().ToIso8601();
 		double EndTime = FPlatformTime::Seconds() + (ShutdownFlushTimeMs / 1000.0);
@@ -143,12 +144,13 @@ void UMetricFlowSubsystem::Deinitialize()
 		if (ShutdownMode == EMetricFlowShutdownMode::FlushThenPersist || ShutdownMode == EMetricFlowShutdownMode::Flush)
 			TrySendLastEvents(EndTime);
 
-		if (!bShutdownWaitForResponses) return;
-	
-		while (RequestsInFlight > 0 && FPlatformTime::Seconds() < EndTime)
+		if (bShutdownWaitForResponses)
 		{
-			FHttpModule::Get().GetHttpManager().Tick(0.0f);
-			FPlatformProcess::Sleep(0);
+			while (RequestsInFlight > 0 && FPlatformTime::Seconds() < EndTime)
+			{
+				FHttpModule::Get().GetHttpManager().Tick(0.0f);
+				FPlatformProcess::Sleep(0);
+			}
 		}
 		
 		if (ShutdownMode == EMetricFlowShutdownMode::FlushThenPersist || ShutdownMode == EMetricFlowShutdownMode::Persist)
@@ -273,7 +275,6 @@ bool UMetricFlowSubsystem::SendRequest(FMetricFlowPendingRequest Req)
 	if (ActiveEndpointURL.IsEmpty()) return false;
 	if (Req.InFlightPolicy == EMetricFlowInFlightPolicy::WaitUntilIdle && RequestsInFlight != 0)
 	{
-		UE_LOG(LogMetricFlow, Warning, TEXT("RequestsInFlight: %d"), RequestsInFlight);
 		return false;
 	}
 	if (Req.Json.IsEmpty())
@@ -336,7 +337,7 @@ void UMetricFlowSubsystem::TrySendLastEvents(const double EndTime)
 		if (FPlatformTime::Seconds() > EndTime) return;
 		
 		FMetricFlowPendingRequest Req;
-		if (!BuildAppendEventsRequest(Req, 1, MaxLastBatchSize)) continue;
+		if (!BuildAppendEventsRequest(Req, 1, MaxLastBatchSize)) return;
 		Req.InFlightPolicy = EMetricFlowInFlightPolicy::Ignore;
 		const int32 SentCount = Req.SendBatch.Num();
 
