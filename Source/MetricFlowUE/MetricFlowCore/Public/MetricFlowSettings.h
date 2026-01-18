@@ -7,6 +7,16 @@
 #include "Engine/DeveloperSettings.h"
 #include "MetricFlowSettings.generated.h"
 
+
+UENUM(BlueprintType)
+enum class EMetricFlowShutdownMode : uint8
+{
+	None,
+	Flush,
+	Persist,
+	FlushThenPersist,
+};
+
 UCLASS(Config=Game, DefaultConfig, meta=(DisplayName="Metric Flow UE"))
 class UMetricFlowSettings : public UDeveloperSettings
 {
@@ -65,6 +75,23 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Reliability", meta=(ClampMin="0.1", UIMin="0.1"))
 	float RequestTimeoutSeconds = 10.0f;
 
+	UPROPERTY(EditAnywhere, Config, Category="Shutdown")
+	EMetricFlowShutdownMode ShutdownMode = EMetricFlowShutdownMode::FlushThenPersist;
+
+	UPROPERTY(EditAnywhere, Config, Category="Shutdown", meta=(ClampMin="100", UIMin="100", EditCondition="bShutdownUsesFlush", EditConditionHides))
+	float ShutdownFlushTimeMs = 3000.0f;
+
+	UPROPERTY(EditAnywhere, Config, Category="Shutdown", meta=(ClampMin="1", UIMin="1", EditCondition="bShutdownUsesFlush", EditConditionHides))
+	int32 MaxLastBatchSize = 200;
+
+	UPROPERTY(EditAnywhere, Config, Category="Shutdown", meta=(ClampMin="1", UIMin="1", EditCondition="bShutdownUsesFlush", EditConditionHides))
+	int32 MaxShutdownBatches = 3;
+
+	UPROPERTY(EditAnywhere, Config, Category="Shutdown", meta=(EditCondition="bShutdownUsesFlush", EditConditionHides))
+	bool bShutdownWaitForResponses = false;
+
+	
+
 	FString GetActiveEndpointURL() const
 	{
 #if UE_BUILD_SHIPPING
@@ -79,6 +106,9 @@ public:
 	};
 	
 private:
+	UPROPERTY(Transient)
+	bool bShutdownUsesFlush = true;
+	
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
 #endif

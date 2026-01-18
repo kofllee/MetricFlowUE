@@ -1,5 +1,7 @@
 #include "MetricFlowSubsystem.h"
 
+#include "HttpManager.h"
+#include "HttpModule.h"
 #include "MetricFlowDefaultEventContextProvider.h"
 #include "MetricFlowDefaultSessionContextProvider.h"
 #include "MetricFlowEvent.h"
@@ -10,16 +12,9 @@ namespace MetricFLow
 {
 	static bool ShouldRetry(bool bWasSuccessful, int32 ResponseCode)
 	{
-		if (!bWasSuccessful)
-		{
-			return true;
-		}
-
-		if (ResponseCode >= 500 && ResponseCode < 600)
-		{
-			return true;
-		}
-		
+		if (!bWasSuccessful) return true;
+		if (ResponseCode == 0 || ResponseCode == -1) return true;
+		if (ResponseCode >= 500 && ResponseCode < 600) return true;
 		return false;
 	}
 
@@ -53,10 +48,16 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	ActiveEndpointURL = Settings->GetActiveEndpointURL();
 
 	MaxQueueSize = Settings->MaxQueueSize;
+	MaxShutdownBatches = Settings->MaxShutdownBatches;
 	MinBatchSize = FMath::Max(1, Settings->MinSendBatchSize);
 	MaxBatchSize = FMath::Max(MinBatchSize, Settings->MaxSendBatchSize);
 	EventSeq = 0;
+	MaxLastBatchSize = FMath::Max(1, Settings->MaxSendBatchSize);
 
+	ShutdownMode = Settings->ShutdownMode;
+	ShutdownFlushTimeMs = Settings->ShutdownFlushTimeMs;
+	bShutdownWaitForResponses = Settings->bShutdownWaitForResponses;
+	
 	TimeoutSeconds = Settings->RequestTimeoutSeconds;
 
 	if (ActiveEndpointURL.IsEmpty())
@@ -82,6 +83,8 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	{
 		return;
 	}
+
+	RequestsInFlight = 0;
 
 	SessionId = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens);
 	SessionStartedAtUTC = FDateTime::UtcNow().ToIso8601();
@@ -118,10 +121,32 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UMetricFlowSubsystem::Deinitialize()
 {
-	Super::Deinitialize();
+	if (bEnabledRuntime)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(TimerHandle);
+		}
+		SessionEndedAtUTC = FDateTime::UtcNow().ToIso8601();
+		double EndTime = FPlatformTime::Seconds() + (ShutdownFlushTimeMs / 1000.0);
+		TrySendUpsertSession();
 
-	SessionEndedAtUTC = FDateTime::UtcNow().ToIso8601();
-	TrySendUpsertSession();
+		if (ShutdownMode == EMetricFlowShutdownMode::FlushThenPersist || ShutdownMode == EMetricFlowShutdownMode::Flush)
+			TrySendLastEvents(EndTime);
+
+		if (!bShutdownWaitForResponses) return;
+	
+		while (RequestsInFlight > 0 && FPlatformTime::Seconds() < EndTime)
+		{
+			FHttpModule::Get().GetHttpManager().Tick(0.0f);
+			FPlatformProcess::Sleep(0);
+		}
+
+		if (ShutdownMode == EMetricFlowShutdownMode::FlushThenPersist || ShutdownMode == EMetricFlowShutdownMode::Persist)
+			PersistQueueToDisk();
+	}
+
+	Super::Deinitialize();
 }
 
 
@@ -184,12 +209,12 @@ bool UMetricFlowSubsystem::BuildUpsertSessionRequest(FMetricFlowPendingRequest& 
 	return true;
 }
 
-bool UMetricFlowSubsystem::BuildAppendEventsRequest(FMetricFlowPendingRequest& OutReq)
+bool UMetricFlowSubsystem::BuildAppendEventsRequest(FMetricFlowPendingRequest& OutReq, const int32 MinSendBatchSize, const int32 MaxSendBatchSize)
 {
 	if (EventQueue.Num() == 0) return false;
 	
-	const int32 Count = FMath::Min(MaxBatchSize, EventQueue.Num());
-	if (Count < MinBatchSize) return false;
+	const int32 Count = FMath::Min(MaxSendBatchSize, EventQueue.Num());
+	if (Count < MinSendBatchSize) return false;
 
 	TArray<FMetricFlowEvent> Batch;
 	Batch.Reserve(Count);
@@ -211,18 +236,16 @@ bool UMetricFlowSubsystem::BuildAppendEventsRequest(FMetricFlowPendingRequest& O
 
 void UMetricFlowSubsystem::TrySendUpsertSession()
 {
-	if (!bEnabledRuntime) return;
-	if (bIsFlushing) return;
-	
 	FMetricFlowPendingRequest Req;
 	if (!BuildUpsertSessionRequest(Req)) return;
+	Req.InFlightPolicy = EMetricFlowInFlightPolicy::Ignore;
 	SendRequest(MoveTemp(Req));
 }
 
 void UMetricFlowSubsystem::TrySendAppendEvents()
 {
 	FMetricFlowPendingRequest Req;
-	if (!BuildAppendEventsRequest(Req)) return;
+	if (!BuildAppendEventsRequest(Req, MinBatchSize, MaxBatchSize)) return;
 	const int32 SentCount = Req.SendBatch.Num();
 	
 	if (!SendRequest(MoveTemp(Req))) return;
@@ -237,14 +260,18 @@ bool UMetricFlowSubsystem::SendRequest(FMetricFlowPendingRequest Req)
 {
 	if (!bEnabledRuntime) return false;
 	if (ActiveEndpointURL.IsEmpty()) return false;
-	if (bIsFlushing) return false;
+	if (Req.InFlightPolicy == EMetricFlowInFlightPolicy::WaitUntilIdle && RequestsInFlight != 0)
+	{
+		UE_LOG(LogMetricFlow, Warning, TEXT("RequestsInFlight: %d"), RequestsInFlight);
+		return false;
+	}
 	if (Req.Json.IsEmpty())
 	{
 		UE_LOG(LogMetricFlow, Warning, TEXT("UMetricFlowSubsystem::SendRequest: Empty JSON for %s"), ToString(Req.Op));
 		return false;
 	}
 
-	bIsFlushing = true;
+	RequestsInFlight++;
 
 	TWeakObjectPtr<UMetricFlowSubsystem> WeakThis(this);
 	Sender.PostJson(ActiveEndpointURL, ProxyApiKey, Req.Json, TimeoutSeconds,
@@ -253,29 +280,54 @@ bool UMetricFlowSubsystem::SendRequest(FMetricFlowPendingRequest Req)
 			if (!WeakThis.IsValid()) return;
 			WeakThis->OnRequestCompleted(Req, bWasSuccessful, ResponseCode, ResponseBody);
 		});
-
+	
 	return true;
 }
 
 void UMetricFlowSubsystem::OnRequestCompleted(const FMetricFlowPendingRequest& Req, const bool bWasSuccessful, const int32 ResponseCode,
 	const FString& ResponseBody)
 {
-	bIsFlushing = false;
-
 	if (bWasSuccessful && ResponseCode >= 200 && ResponseCode < 300)
 	{
 		UE_LOG(LogMetricFlow, Log, TEXT("MetricFlow %s succeeded: code=%d body=%s"),ToString(Req.Op), ResponseCode, *ResponseBody);
+		RequestsInFlight--;
 		return;
 	}
 
 	UE_LOG(LogMetricFlow, Warning, TEXT("MetricFlow %s failed: code=%d body=%s"), ToString(Req.Op), ResponseCode, *ResponseBody);
-	if (MetricFLow::ShouldRetry(bWasSuccessful, ResponseCode))
+	const bool bRetry = MetricFLow::ShouldRetry(bWasSuccessful, ResponseCode);
+	if (bRetry && Req.Op == EMetricFlowOp::AppendEvents && Req.SendBatch.Num() > 0)
 	{
-		if (Req.Op == EMetricFlowOp::AppendEvents)
+		EventQueue.Insert(Req.SendBatch, 0);
+	}
+
+	RequestsInFlight--;
+}
+
+void UMetricFlowSubsystem::TrySendLastEvents(const double EndTime)
+{
+	int32 BatchesSent = 0;
+	while (EventQueue.Num() > 0 && BatchesSent < MaxShutdownBatches)
+	{
+		if (FPlatformTime::Seconds() > EndTime) return;
+		
+		FMetricFlowPendingRequest Req;
+		if (!BuildAppendEventsRequest(Req, 1, MaxLastBatchSize)) continue;
+		Req.InFlightPolicy = EMetricFlowInFlightPolicy::Ignore;
+		const int32 SentCount = Req.SendBatch.Num();
+
+		if (!SendRequest(MoveTemp(Req))) continue;
+		BatchesSent++;
+		if (SentCount > 0)
 		{
-			EventQueue.Insert(Req.SendBatch, 0);
+			EventQueue.RemoveAt(0, SentCount, EAllowShrinking::No);
 		}
 	}
+}
+
+void UMetricFlowSubsystem::PersistQueueToDisk()
+{
+	
 }
 
 void UMetricFlowSubsystem::LoadProvidersFromSettings(const UMetricFlowSettings* Settings)
