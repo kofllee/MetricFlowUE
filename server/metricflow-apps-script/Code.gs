@@ -66,39 +66,45 @@ function doPost(e) {
 }
 
 function handleUpsertSession(body){
-  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
 
-  const dynamicHeader = buildSessionsHeaderFromBody_(body);
-  const sh = ensureSheetWithHeader_(ss, CONFIG.SESSIONS_SHEET, dynamicHeader);
-  const header = getSheetHeader_(sh);
-  const idx = makeHeaderIndex_(header);
+  try{
+    const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
 
-  const s = body.session;
+    const dynamicHeader = buildSessionsHeaderFromBody_(body);
+    const sh = ensureSheetWithHeader_(ss, CONFIG.SESSIONS_SHEET, dynamicHeader);
+    const header = getSheetHeader_(sh);
+    const idx = makeHeaderIndex_(header);
 
-  const values = {
-    projectId: body.projectId,
-    sessionId: body.sessionId,
-    updatedAtUTC: new Date().toISOString(),
-  };
-  const keys = Object.keys(s);
-  for(let i = 0; i < keys.length; i++){
-    const k = keys[i];
-    values[k] = (s[k] === undefined || s[k] === null) ? "" : String(s[k]);
+    const s = body.session;
+
+    const values = {
+      projectId: body.projectId,
+      sessionId: body.sessionId,
+      updatedAtUTC: new Date().toISOString(),
+    };
+    const keys = Object.keys(s);
+    for(let i = 0; i < keys.length; i++){
+      const k = keys[i];
+      values[k] = (s[k] === undefined || s[k] === null) ? "" : String(s[k]);
+    }
+
+    const row = buildRowFast_(header.length, idx, values);
+
+    const keyMap = { sessionId: body.sessionId };
+    const rowNumber = findRowByKeyMap_(sh, header, keyMap);
+
+    if(rowNumber > 0){
+      sh.getRange(rowNumber, 1, 1, header.length).setValues([row]);
+      return resOk({ op: body.op, sessionId: body.sessionId, action: "update", rowNumber });
+    }
+
+    sh.appendRow(row);
+    return resOk({ op: body.op, sessionId: body.sessionId, action: "insert" });
+  } finally{
+    lock.releaseLock();
   }
-
-  const row = buildRowFast_(header.length, idx, values);
-
-  const keyMap = { sessionId: body.sessionId };
-  const rowNumber = findRowByKeyMap_(sh, header, keyMap);
-
-  if(rowNumber > 0){
-    sh.getRange(rowNumber, 1, 1, header.length).setValues([row]);
-    return resOk({ op: body.op, sessionId: body.sessionId, action: "update", rowNumber });
-  }
-
-  sh.appendRow(row);
-  return resOk({ op: body.op, sessionId: body.sessionId, action: "insert" });
-
 }
 
 function handleAppendEvents(body) {
@@ -229,7 +235,7 @@ function findRowByKeyMap_(sh, header, keyMap){
 
   const lastRow = sh.getLastRow();
   if(lastRow < 2) return -1;
-
+  
   const data = sh.getRange(2, 1, lastRow - 1, header.length).getValues();
 
   for(let r = 0; r < data.length; r++){
