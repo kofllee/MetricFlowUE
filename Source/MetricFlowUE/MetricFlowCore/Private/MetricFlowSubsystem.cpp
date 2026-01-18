@@ -1,5 +1,6 @@
 #include "MetricFlowSubsystem.h"
 
+#include "FMetricFlowQueueStore.h"
 #include "HttpManager.h"
 #include "HttpModule.h"
 #include "MetricFlowDefaultEventContextProvider.h"
@@ -52,7 +53,7 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	MinBatchSize = FMath::Max(1, Settings->MinSendBatchSize);
 	MaxBatchSize = FMath::Max(MinBatchSize, Settings->MaxSendBatchSize);
 	EventSeq = 0;
-	MaxLastBatchSize = FMath::Max(1, Settings->MaxSendBatchSize);
+	MaxLastBatchSize = FMath::Max(1, Settings->MaxLastBatchSize);
 
 	ShutdownMode = Settings->ShutdownMode;
 	ShutdownFlushTimeMs = Settings->ShutdownFlushTimeMs;
@@ -109,6 +110,14 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	TrySendUpsertSession();
 	
+	World->GetTimerManager().SetTimer(
+		OutboxTimer,
+		this,
+		&UMetricFlowSubsystem::SendNextOutbox,
+		0.25f,
+		true
+	);
+	
 	const float FlushInterval = Settings->FlushIntervalSeconds;
 	World->GetTimerManager().SetTimer(
 		TimerHandle,
@@ -141,9 +150,11 @@ void UMetricFlowSubsystem::Deinitialize()
 			FHttpModule::Get().GetHttpManager().Tick(0.0f);
 			FPlatformProcess::Sleep(0);
 		}
-
+		
 		if (ShutdownMode == EMetricFlowShutdownMode::FlushThenPersist || ShutdownMode == EMetricFlowShutdownMode::Persist)
+		{
 			PersistQueueToDisk();
+		}
 	}
 
 	Super::Deinitialize();
@@ -200,7 +211,7 @@ bool UMetricFlowSubsystem::BuildUpsertSessionRequest(FMetricFlowPendingRequest& 
 	Session.AddString(TEXT("endedAtUTC"), SessionEndedAtUTC);
 	Session.AddMap(CachedSessionContext);
 
-	const FString Json = MetricFlowJson::SerializeUpsertSessionToString(ProjectId, SessionId, Session);
+	const FString Json = MetricFlowJson::ToString(MetricFlowJson::SerializeUpsertSessionToJson(ProjectId, SessionId, Session));
 	if (Json.IsEmpty()) return false;
 
 	OutReq = FMetricFlowPendingRequest();
@@ -220,7 +231,7 @@ bool UMetricFlowSubsystem::BuildAppendEventsRequest(FMetricFlowPendingRequest& O
 	Batch.Reserve(Count);
 	Batch.Append(EventQueue.GetData(), Count);
 
-	const FString Json = MetricFlowJson::SerializeAppendEventsToString(ProjectId, SessionId, Batch);
+	const FString Json = MetricFlowJson::ToString(MetricFlowJson::SerializeAppendEventsToJson(ProjectId, SessionId, Batch));
 	if (Json.IsEmpty())
 	{
 		return false;
@@ -287,7 +298,20 @@ bool UMetricFlowSubsystem::SendRequest(FMetricFlowPendingRequest Req)
 void UMetricFlowSubsystem::OnRequestCompleted(const FMetricFlowPendingRequest& Req, const bool bWasSuccessful, const int32 ResponseCode,
 	const FString& ResponseBody)
 {
-	if (bWasSuccessful && ResponseCode >= 200 && ResponseCode < 300)
+	bool bOk = bWasSuccessful && ResponseCode >= 200 && ResponseCode < 300;
+
+	if (bOutboxDraining)
+	{
+		if (bOk)
+		{
+			FMetricFlowQueueStore::DeleteFile(OutboxCurrentFile);
+		}
+		bOutboxDraining = false;
+		OutboxCurrentFile.Reset();
+		SendNextOutbox();
+	}
+	
+	if (bOk)
 	{
 		UE_LOG(LogMetricFlow, Log, TEXT("MetricFlow %s succeeded: code=%d body=%s"),ToString(Req.Op), ResponseCode, *ResponseBody);
 		RequestsInFlight--;
@@ -327,7 +351,50 @@ void UMetricFlowSubsystem::TrySendLastEvents(const double EndTime)
 
 void UMetricFlowSubsystem::PersistQueueToDisk()
 {
+	if (EventQueue.Num() <= 0) return;
+
+	const bool bSaved = FMetricFlowQueueStore::SaveBatches(ProjectId, SessionId, EventQueue, MaxLastBatchSize);
+
+	UE_LOG(LogMetricFlow, Log, TEXT("UMetricFlowSubsystem::PersistQueueToDisk: Saved %d events to disk: %hs"), EventQueue.Num(), bSaved ? "success" : "failure");
+}
+
+void UMetricFlowSubsystem::SendNextOutbox()
+{
+	if (bOutboxDraining) return;
 	
+	TArray<FString> Files = FMetricFlowQueueStore::ListQueueFiles();
+	if (Files.Num() == 0)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(OutboxTimer);
+		}
+		return;
+	}
+
+	const FString& FilePath = Files[0];
+
+	FString RequestJson;
+	if (!FMetricFlowQueueStore::LoadBatch(FilePath,  RequestJson) || RequestJson.IsEmpty())
+	{
+		UE_LOG(LogMetricFlow, Warning, TEXT("UMetricFlowSubsystem::SendNextOutbox: Failed to load batch from %s, deleting"), *FilePath);
+		FMetricFlowQueueStore::DeleteFile(FilePath);
+		return;
+	}
+
+	FMetricFlowPendingRequest Req;
+	Req.Op = EMetricFlowOp::AppendEvents;
+	Req.InFlightPolicy = EMetricFlowInFlightPolicy::WaitUntilIdle;
+	Req.Json = RequestJson;
+	
+	bOutboxDraining = true;
+	OutboxCurrentFile = FilePath;
+
+	if (!SendRequest(MoveTemp(Req)))
+	{
+		bOutboxDraining = false;
+		OutboxCurrentFile.Reset();
+	}
 }
 
 void UMetricFlowSubsystem::LoadProvidersFromSettings(const UMetricFlowSettings* Settings)

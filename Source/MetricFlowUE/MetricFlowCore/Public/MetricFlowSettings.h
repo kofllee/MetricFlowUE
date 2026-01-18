@@ -81,13 +81,13 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Shutdown", meta=(ClampMin="100", UIMin="100", EditCondition="bShutdownUsesFlush", EditConditionHides))
 	float ShutdownFlushTimeMs = 3000.0f;
 
-	UPROPERTY(EditAnywhere, Config, Category="Shutdown", meta=(ClampMin="1", UIMin="1", EditCondition="bShutdownUsesFlush", EditConditionHides))
+	UPROPERTY(EditAnywhere, Config, Category="Shutdown", meta=(ClampMin="1", UIMin="1", EditCondition="bShutdownUsesFlush||bShutdownUsesPersist", EditConditionHides))
 	int32 MaxLastBatchSize = 200;
 
 	UPROPERTY(EditAnywhere, Config, Category="Shutdown", meta=(ClampMin="1", UIMin="1", EditCondition="bShutdownUsesFlush", EditConditionHides))
 	int32 MaxShutdownBatches = 3;
 
-	UPROPERTY(EditAnywhere, Config, Category="Shutdown", meta=(EditCondition="bShutdownUsesFlush", EditConditionHides))
+	UPROPERTY(EditAnywhere, Config, Category="Shutdown")
 	bool bShutdownWaitForResponses = false;
 
 	
@@ -107,7 +107,9 @@ public:
 	
 private:
 	UPROPERTY(Transient)
-	bool bShutdownUsesFlush = true;
+	bool bShutdownUsesFlush = ShutdownMode == EMetricFlowShutdownMode::Flush || ShutdownMode == EMetricFlowShutdownMode::FlushThenPersist;
+	UPROPERTY(Transient)
+	bool bShutdownUsesPersist = ShutdownMode == EMetricFlowShutdownMode::Persist || ShutdownMode == EMetricFlowShutdownMode::FlushThenPersist;
 	
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;

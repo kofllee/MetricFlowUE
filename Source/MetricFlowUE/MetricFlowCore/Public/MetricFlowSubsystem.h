@@ -88,9 +88,12 @@ private:
 	EMetricFlowShutdownMode ShutdownMode = EMetricFlowShutdownMode::FlushThenPersist;
 
 	FTimerHandle TimerHandle;
+	FTimerHandle OutboxTimer;
 	FMetricFlowHttpSender Sender = FMetricFlowHttpSender();
 	
 	uint32 RequestsInFlight = 0;
+	bool bOutboxDraining = false;
+	FString OutboxCurrentFile;
 
 	bool BuildUpsertSessionRequest(FMetricFlowPendingRequest& OutReq);
 	bool BuildAppendEventsRequest(FMetricFlowPendingRequest& OutReq, const int32 MinSendBatchSize, const int32 MaxSendBatchSize);
@@ -102,6 +105,8 @@ private:
 
 	void TrySendLastEvents(const double EndTime);
 	void PersistQueueToDisk();
+
+	void SendNextOutbox();
 	
 	void LoadProvidersFromSettings(const UMetricFlowSettings* Settings);
 	void RebuildSessionContextCache();

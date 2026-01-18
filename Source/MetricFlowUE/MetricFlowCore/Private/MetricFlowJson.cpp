@@ -14,7 +14,7 @@ TSharedPtr<FJsonObject> MetricFlowJson::SerializeFieldsToJson(const FMetricFlowF
 	return Json;
 }
 
-FString MetricFlowJson::SerializeAppendEventsToString(const FString& ProjectId, const FString& SessionId,
+TSharedPtr<FJsonObject> MetricFlowJson::SerializeAppendEventsToJson(const FString& ProjectId, const FString& SessionId,
 	const TArray<FMetricFlowEvent>& Events)
 {
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -50,19 +50,10 @@ FString MetricFlowJson::SerializeAppendEventsToString(const FString& ProjectId, 
 
 	Root->SetArrayField(TEXT("events"), JsonEvents);
 
-	FString out;
-	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&out);
-	if (FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
-	{
-		Writer->Close();
-		return out;
-	}
-	
-	UE_LOG(LogMetricFlow, Error, TEXT("MetricFlowJson::SerializeAppendEventsToString: Failed to serialize JSON"));
-	return FString();
+	return Root;
 }
 
-FString MetricFlowJson::SerializeUpsertSessionToString(const FString& ProjectId, const FString& SessionId,
+TSharedPtr<FJsonObject> MetricFlowJson::SerializeUpsertSessionToJson(const FString& ProjectId, const FString& SessionId,
 	const FMetricFlowFields& Session)
 {
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
@@ -71,14 +62,20 @@ FString MetricFlowJson::SerializeUpsertSessionToString(const FString& ProjectId,
 	Root->SetStringField(TEXT("sessionId"), SessionId);
 	Root->SetObjectField(TEXT("session"), SerializeFieldsToJson(Session));
 	
+	return Root;
+}
+
+FString MetricFlowJson::ToString(const TSharedPtr<FJsonObject>& Json)
+{
 	FString out;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&out);
-	if (FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
+	if (FJsonSerializer::Serialize(Json.ToSharedRef(), Writer))
 	{
 		Writer->Close();
 		return out;
 	}
 	
-	UE_LOG(LogMetricFlow, Error, TEXT("MetricFlowJson::SerializeUpsertSessionToString: Failed to serialize JSON"));
+	UE_LOG(LogMetricFlow, Error, TEXT("MetricFlowJson::SerializeJsonToString: Failed to serialize JSON"));
 	return FString();
 }
+

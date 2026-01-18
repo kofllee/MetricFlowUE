@@ -7,13 +7,15 @@ namespace MetricFlowJson
 {
 	TSharedPtr<FJsonObject> SerializeFieldsToJson(const FMetricFlowFields& Fields);
 
-	FString SerializeAppendEventsToString(
+	TSharedPtr<FJsonObject> SerializeAppendEventsToJson(
 		const FString& ProjectId,
 		const FString& SessionId,
 		const TArray<FMetricFlowEvent>& Events);
 
-	FString SerializeUpsertSessionToString(
+	TSharedPtr<FJsonObject> SerializeUpsertSessionToJson(
 		const FString& ProjectId,
 		const FString& SessionId,
 		const FMetricFlowFields& SessionSnapshot);
+	
+	FString ToString(const TSharedPtr<FJsonObject>& Json);
 }
