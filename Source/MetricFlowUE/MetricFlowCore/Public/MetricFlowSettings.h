@@ -74,6 +74,12 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, Category="Reliability", meta=(ClampMin="0.1", UIMin="0.1"))
 	float RequestTimeoutSeconds = 10.0f;
+	
+	UPROPERTY(EditAnywhere, Config, Category="Reliability", meta=(ClampMin="0", UIMin="0"))
+    int32 RetryMaxAttempts = 3;
+
+	UPROPERTY(EditAnywhere, Config, Category="Reliability", meta=(ClampMin="1.0", UIMin="1.0"))
+	float FlushRetryBackoffMultiplier = 1.5f;
 
 	UPROPERTY(EditAnywhere, Config, Category="Shutdown")
 	EMetricFlowShutdownMode ShutdownMode = EMetricFlowShutdownMode::FlushThenPersist;

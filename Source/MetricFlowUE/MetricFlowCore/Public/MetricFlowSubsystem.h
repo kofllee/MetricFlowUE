@@ -80,6 +80,14 @@ private:
 	int32 MinBatchSize;
 	int32 MaxLastBatchSize;
 
+	float DefaultFlushInterval;
+	float CurrentFlushInterval;
+	float FlushRetryIntervalMultiplier;
+	
+	int32 RetryCount = 0;
+	int32 RetryMaxAttempts;
+	bool bRetrySessionUpsert = false;
+
 	float ShutdownFlushTimeMs;
 	bool bShutdownWaitForResponses;
 
@@ -97,7 +105,8 @@ private:
 
 	bool BuildUpsertSessionRequest(FMetricFlowPendingRequest& OutReq);
 	bool BuildAppendEventsRequest(FMetricFlowPendingRequest& OutReq, const int32 MinSendBatchSize, const int32 MaxSendBatchSize);
-	
+
+	void TrySendNext();
 	void TrySendUpsertSession();
 	void TrySendAppendEvents();
 	bool SendRequest(FMetricFlowPendingRequest Req);
@@ -110,6 +119,8 @@ private:
 	
 	void LoadProvidersFromSettings(const UMetricFlowSettings* Settings);
 	void RebuildSessionContextCache();
+
+	void TurnOffTimers();
 	
 	static FMetricFlowEvent CreateMetricFlowEvent(const FName& EventName, const int64 Seq, const FMetricFlowFields& ExtraContext,
 		const FMetricFlowFields& Payload, const TArray<FString>& ExtraSheets);

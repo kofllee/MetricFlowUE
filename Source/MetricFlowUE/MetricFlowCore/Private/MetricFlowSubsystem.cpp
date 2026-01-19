@@ -8,6 +8,7 @@
 #include "MetricFlowEvent.h"
 #include "MetricFlowFields.h"
 #include "MetricFlowJson.h"
+#include "Engine/WorldComposition.h"
 
 namespace MetricFLow
 {
@@ -54,6 +55,11 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	MaxBatchSize = FMath::Max(MinBatchSize, Settings->MaxSendBatchSize);
 	EventSeq = 0;
 	MaxLastBatchSize = FMath::Max(1, Settings->MaxLastBatchSize);
+	DefaultFlushInterval = Settings->FlushIntervalSeconds;
+	CurrentFlushInterval = Settings->FlushIntervalSeconds;
+	FlushRetryIntervalMultiplier = Settings->FlushRetryBackoffMultiplier;
+	RetryMaxAttempts = Settings->RetryMaxAttempts;
+	RetryCount = 0;
 
 	ShutdownMode = Settings->ShutdownMode;
 	ShutdownFlushTimeMs = Settings->ShutdownFlushTimeMs;
@@ -118,12 +124,11 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		true
 	);
 	
-	const float FlushInterval = Settings->FlushIntervalSeconds;
 	World->GetTimerManager().SetTimer(
 		TimerHandle,
 		this,
-		&UMetricFlowSubsystem::TrySendAppendEvents,
-		FlushInterval,
+		&UMetricFlowSubsystem::TrySendNext,
+		CurrentFlushInterval,
 		true
 	);
 }
@@ -132,11 +137,8 @@ void UMetricFlowSubsystem::Deinitialize()
 {
 	if (bEnabledRuntime)
 	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().ClearTimer(TimerHandle);
-			World->GetTimerManager().ClearTimer(OutboxTimer);
-		}
+		TurnOffTimers();
+		
 		SessionEndedAtUTC = FDateTime::UtcNow().ToIso8601();
 		double EndTime = FPlatformTime::Seconds() + (ShutdownFlushTimeMs / 1000.0);
 		TrySendUpsertSession();
@@ -247,6 +249,17 @@ bool UMetricFlowSubsystem::BuildAppendEventsRequest(FMetricFlowPendingRequest& O
 	return true;
 }
 
+void UMetricFlowSubsystem::TrySendNext()
+{
+	if (bRetrySessionUpsert)
+	{
+		TrySendUpsertSession();
+		return;
+	}
+
+	TrySendAppendEvents();
+}
+
 void UMetricFlowSubsystem::TrySendUpsertSession()
 {
 	FMetricFlowPendingRequest Req;
@@ -299,7 +312,8 @@ bool UMetricFlowSubsystem::SendRequest(FMetricFlowPendingRequest Req)
 void UMetricFlowSubsystem::OnRequestCompleted(const FMetricFlowPendingRequest& Req, const bool bWasSuccessful, const int32 ResponseCode,
 	const FString& ResponseBody)
 {
-	bool bOk = bWasSuccessful && ResponseCode >= 200 && ResponseCode < 300;
+	const bool bOk = bWasSuccessful && ResponseCode >= 200 && ResponseCode < 300;
+	const bool bRetry = MetricFLow::ShouldRetry(bWasSuccessful, ResponseCode);
 
 	if (bOutboxDraining)
 	{
@@ -316,16 +330,54 @@ void UMetricFlowSubsystem::OnRequestCompleted(const FMetricFlowPendingRequest& R
 	{
 		UE_LOG(LogMetricFlow, Log, TEXT("MetricFlow %s succeeded: code=%d body=%s"),ToString(Req.Op), ResponseCode, *ResponseBody);
 		RequestsInFlight--;
+		RetryCount = 0;
+		CurrentFlushInterval = DefaultFlushInterval;
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(TimerHandle);
+			World->GetTimerManager().SetTimer(
+				TimerHandle,
+				this,
+				&UMetricFlowSubsystem::TrySendNext,
+				CurrentFlushInterval,
+				true
+			);
+		}
 		return;
 	}
 
 	UE_LOG(LogMetricFlow, Warning, TEXT("MetricFlow %s failed: code=%d body=%s"), ToString(Req.Op), ResponseCode, *ResponseBody);
-	const bool bRetry = MetricFLow::ShouldRetry(bWasSuccessful, ResponseCode);
-	if (bRetry && Req.Op == EMetricFlowOp::AppendEvents && Req.SendBatch.Num() > 0)
+	if (Req.Op == EMetricFlowOp::AppendEvents && Req.SendBatch.Num() > 0)
 	{
 		EventQueue.Insert(Req.SendBatch, 0);
 	}
 
+	if (bRetry && RetryCount < RetryMaxAttempts)
+	{
+		RetryCount++;
+		CurrentFlushInterval *= FlushRetryIntervalMultiplier;
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(TimerHandle);
+			World->GetTimerManager().SetTimer(
+				TimerHandle,
+				this,
+				&UMetricFlowSubsystem::TrySendNext,
+				CurrentFlushInterval,
+				true
+			);
+		}
+		
+		UE_LOG(LogMetricFlow, Log, TEXT("UMetricFlowSubsystem::OnRequestCompleted: Scheduling retry %d/%d in %.2f seconds"),
+			RetryCount, RetryMaxAttempts, CurrentFlushInterval);
+	}
+	else
+	{
+		TurnOffTimers();
+		bEnabledRuntime = false;
+		UE_LOG(LogMetricFlow, Error, TEXT("UMetricFlowSubsystem::OnRequestCompleted: Max retries reached or non-retriable error, turning off MetricFlow runtime"));
+	}
+	
 	RequestsInFlight--;
 }
 
@@ -450,5 +502,14 @@ void UMetricFlowSubsystem::RebuildSessionContextCache()
 		{
 			CachedSessionContext.Add(Pair.Key, Pair.Value);
 		}
+	}
+}
+
+void UMetricFlowSubsystem::TurnOffTimers()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(TimerHandle);
+		World->GetTimerManager().ClearTimer(OutboxTimer);
 	}
 }
