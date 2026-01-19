@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MetricFlowContextProviderBase.h"
 #include "MetricFlowDefaultEventContextProvider.h"
 #include "MetricFlowDefaultSessionContextProvider.h"
 #include "Engine/DeveloperSettings.h"
@@ -70,7 +69,9 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, Category="Batching", meta=(ClampMin="10", UIMin="10"))
 	int32 MaxQueueSize = 2000;
-	
+
+	UPROPERTY(EditAnywhere, Config, Category="Shutdown")
+	bool bShutdownWaitForResponses = false;
 
 	UPROPERTY(EditAnywhere, Config, Category="Reliability", meta=(ClampMin="0.1", UIMin="0.1"))
 	float RequestTimeoutSeconds = 10.0f;
@@ -93,11 +94,6 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Shutdown", meta=(ClampMin="1", UIMin="1", EditCondition="bShutdownUsesFlush", EditConditionHides))
 	int32 MaxShutdownBatches = 3;
 
-	UPROPERTY(EditAnywhere, Config, Category="Shutdown")
-	bool bShutdownWaitForResponses = false;
-
-	
-
 	FString GetActiveEndpointURL() const
 	{
 #if UE_BUILD_SHIPPING
@@ -113,13 +109,16 @@ public:
 	
 private:
 	UPROPERTY(Transient)
-	bool bShutdownUsesFlush = ShutdownMode == EMetricFlowShutdownMode::Flush || ShutdownMode == EMetricFlowShutdownMode::FlushThenPersist;
+	bool bShutdownUsesFlush = false;
 	UPROPERTY(Transient)
-	bool bShutdownUsesPersist = ShutdownMode == EMetricFlowShutdownMode::Persist || ShutdownMode == EMetricFlowShutdownMode::FlushThenPersist;
-	
+	bool bShutdownUsesPersist = false;
+
+	virtual void PostInitProperties() override;
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
 #endif
+
+	void RecalculateShutdownFlag();
 	
 };
 
