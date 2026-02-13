@@ -148,10 +148,18 @@ void UMetricFlowSubsystem::Deinitialize()
 
 		if (bShutdownWaitForResponses)
 		{
+			const float SleepInterval = 0.01f;
 			while (RequestsInFlight > 0 && FPlatformTime::Seconds() < EndTime)
 			{
-				FHttpModule::Get().GetHttpManager().Tick(0.0f);
-				FPlatformProcess::Sleep(0);
+				FHttpModule::Get().GetHttpManager().Tick(SleepInterval);
+
+				if(FSlateApplication::IsInitialized())
+				{
+					FSlateApplication::Get().PumpMessages();
+					FSlateApplication::Get().Tick();
+				}
+				
+				FPlatformProcess::Sleep(SleepInterval);
 			}
 		}
 		
