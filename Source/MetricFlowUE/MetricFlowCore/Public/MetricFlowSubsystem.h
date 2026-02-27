@@ -95,8 +95,8 @@ private:
 
 	EMetricFlowShutdownMode ShutdownMode = EMetricFlowShutdownMode::FlushThenPersist;
 
-	FTimerHandle TimerHandle;
-	FTimerHandle OutboxTimer;
+	FTSTicker::FDelegateHandle FlushTimerHandle;
+	FTSTicker::FDelegateHandle OutboxTimerHandle;
 	FMetricFlowHttpSender Sender = FMetricFlowHttpSender();
 	
 	uint32 RequestsInFlight = 0;

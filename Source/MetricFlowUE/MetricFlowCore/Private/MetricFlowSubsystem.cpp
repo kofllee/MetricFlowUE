@@ -8,7 +8,7 @@
 #include "MetricFlowEvent.h"
 #include "MetricFlowFields.h"
 #include "MetricFlowJson.h"
-#include "Engine/WorldComposition.h"
+#include "Containers/Ticker.h"
 
 namespace MetricFLow
 {
@@ -106,30 +106,25 @@ void UMetricFlowSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		bEnabledRuntime ? 1 : 0,
 		*SessionId
 	);
-	
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		UE_LOG(LogMetricFlow, Warning, TEXT("UMetricFlowSubsystem::Initialize: World is null, flush timer not started"));
-		return;
-	}
 
 	TrySendUpsertSession();
-	
-	World->GetTimerManager().SetTimer(
-		OutboxTimer,
-		this,
-		&UMetricFlowSubsystem::SendNextOutbox,
-		0.25f,
-		true
+
+	OutboxTimerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([this](float DeltaTime)
+		{
+			SendNextOutbox();
+			return true;
+		}),
+		DefaultFlushInterval
 	);
-	
-	World->GetTimerManager().SetTimer(
-		TimerHandle,
-		this,
-		&UMetricFlowSubsystem::TrySendNext,
-		CurrentFlushInterval,
-		true
+
+	FlushTimerHandle = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([this](float DeltaTime)
+		{
+			TrySendNext();
+			return true;
+		}),
+		CurrentFlushInterval
 	);
 }
 
@@ -331,7 +326,6 @@ void UMetricFlowSubsystem::OnRequestCompleted(const FMetricFlowPendingRequest& R
 		}
 		bOutboxDraining = false;
 		OutboxCurrentFile.Reset();
-		SendNextOutbox();
 	}
 	
 	if (bOk)
@@ -340,17 +334,20 @@ void UMetricFlowSubsystem::OnRequestCompleted(const FMetricFlowPendingRequest& R
 		RequestsInFlight--;
 		RetryCount = 0;
 		CurrentFlushInterval = DefaultFlushInterval;
-		if (UWorld* World = GetWorld())
+		
+		if (FlushTimerHandle.IsValid())
 		{
-			World->GetTimerManager().ClearTimer(TimerHandle);
-			World->GetTimerManager().SetTimer(
-				TimerHandle,
-				this,
-				&UMetricFlowSubsystem::TrySendNext,
-				CurrentFlushInterval,
-				true
-			);
+			FTSTicker::GetCoreTicker().RemoveTicker(FlushTimerHandle);
+			FlushTimerHandle.Reset();
 		}
+		FlushTimerHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda([this](float DeltaTime)
+			{
+				TrySendNext();
+				return true;
+			}),
+			CurrentFlushInterval
+		);
 		return;
 	}
 
@@ -364,17 +361,20 @@ void UMetricFlowSubsystem::OnRequestCompleted(const FMetricFlowPendingRequest& R
 	{
 		RetryCount++;
 		CurrentFlushInterval *= FlushRetryIntervalMultiplier;
-		if (UWorld* World = GetWorld())
+
+		if (FlushTimerHandle.IsValid())
 		{
-			World->GetTimerManager().ClearTimer(TimerHandle);
-			World->GetTimerManager().SetTimer(
-				TimerHandle,
-				this,
-				&UMetricFlowSubsystem::TrySendNext,
-				CurrentFlushInterval,
-				true
-			);
+			FTSTicker::GetCoreTicker().RemoveTicker(FlushTimerHandle);
+			FlushTimerHandle.Reset();
 		}
+		FlushTimerHandle = FTSTicker::GetCoreTicker().AddTicker(
+			FTickerDelegate::CreateLambda([this](float DeltaTime)
+			{
+				TrySendNext();
+				return true;
+			}),
+			CurrentFlushInterval
+		);
 		
 		UE_LOG(LogMetricFlow, Log, TEXT("UMetricFlowSubsystem::OnRequestCompleted: Scheduling retry %d/%d in %.2f seconds"),
 			RetryCount, RetryMaxAttempts, CurrentFlushInterval);
@@ -426,9 +426,10 @@ void UMetricFlowSubsystem::SendNextOutbox()
 	TArray<FString> Files = FMetricFlowQueueStore::ListQueueFiles();
 	if (Files.Num() == 0)
 	{
-		if (UWorld* World = GetWorld())
+		if (OutboxTimerHandle.IsValid())
 		{
-			World->GetTimerManager().ClearTimer(OutboxTimer);
+			FTSTicker::GetCoreTicker().RemoveTicker(OutboxTimerHandle);
+			OutboxTimerHandle.Reset();
 		}
 		return;
 	}
@@ -515,9 +516,15 @@ void UMetricFlowSubsystem::RebuildSessionContextCache()
 
 void UMetricFlowSubsystem::TurnOffTimers()
 {
-	if (UWorld* World = GetWorld())
+	if (OutboxTimerHandle.IsValid())
 	{
-		World->GetTimerManager().ClearTimer(TimerHandle);
-		World->GetTimerManager().ClearTimer(OutboxTimer);
+		FTSTicker::GetCoreTicker().RemoveTicker(OutboxTimerHandle);
+		OutboxTimerHandle.Reset();
+	}
+
+	if (FlushTimerHandle.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(FlushTimerHandle);
+		FlushTimerHandle.Reset();
 	}
 }
